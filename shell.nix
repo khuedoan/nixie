@@ -21,5 +21,10 @@ pkgs.mkShell {
   packages = [
     goEnv
     gomod2nix
+
+    pkgs.gnumake
+    pkgs.nixfmt-tree
+    # TODO maybe embed this into the binary?
+    pkgs.nixos-anywhere
   ];
 }

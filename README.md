@@ -40,9 +40,9 @@ sequenceDiagram
 
     loop For each machine
     Nixie->>Machines: Try checking status
+    Nixie->>Nixie: Skip if already installed
     end
 
-    Nixie->>Nixie: Filter already installed hosts
     Nixie->>Nix: Build installer components<br/>(kernel, initrd, squashfs)
     Nixie->>Nixie: Start server components in goroutines<br/>(DHCP/TFTP/HTTP/API)
 
