@@ -4,10 +4,14 @@
 default: build
 
 build:
-	nix build
+	nix build .
 
 dev:
-	nix run
+	nix run . -- \
+		--installer ./examples#installer \
+		--flake ./examples \
+		--hosts ./examples/hosts.json \
+		--ssh-key ~/.ssh/id_ed25519
 
 test:
 	nix flake check
