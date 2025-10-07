@@ -4,8 +4,18 @@ NixOS PXE boot install with
 [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN),
 [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) and
 [nixos-anywhere](https://nix-community.github.io/nixos-anywhere).
-
 Currently, only `x86_64-linux` is supported.
+
+## Features
+
+- [x] Simple, declarative JSON configuration
+- [x] Build a custom NixOS installer from a flake
+- [x] Built-in PXE server to serve netboot components from the custom installer
+- [ ] Host status check with IP discovery
+- [ ] Remote power-on with Wake-on-LAN
+- [ ] Custom agent and API to manage the installation process
+- [ ] Install NixOS from a flake using nixos-anywhere
+- [x] Stateless
 
 ## Usage
 
