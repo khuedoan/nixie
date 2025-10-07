@@ -3,10 +3,12 @@ package main
 import (
 	"flag"
 
+	"code.khuedoan.com/nixie/internal/hosts"
+
 	"github.com/charmbracelet/log"
 )
 
-type Config struct {
+type Flags struct {
 	Address   string
 	Debug     bool
 	Flake     string
@@ -15,23 +17,23 @@ type Config struct {
 	SSHKey    string
 }
 
-func parseFlags() Config {
-	var config Config
+func parseFlags() Flags {
+	var flags Flags
 
-	flag.BoolVar(&config.Debug, "debug", false, "Enable debug logging")
-	flag.StringVar(&config.Address, "address", "0.0.0.0", "Address to listen on")
-	flag.StringVar(&config.Flake, "flake", "", "NixOS configuration flake (for example, .)")
-	flag.StringVar(&config.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
-	flag.StringVar(&config.Installer, "installer", "", "NixOS installer flake output (for example, .#installer)")
-	flag.StringVar(&config.SSHKey, "ssh-key", "", "Path to the SSH private key (for example, ~/.ssh/id_ed25519)")
+	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug logging")
+	flag.StringVar(&flags.Address, "address", "0.0.0.0", "Address to listen on")
+	flag.StringVar(&flags.Flake, "flake", "", "NixOS configuration flake (for example, .)")
+	flag.StringVar(&flags.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
+	flag.StringVar(&flags.Installer, "installer", "", "NixOS installer flake output (for example, .#installer)")
+	flag.StringVar(&flags.SSHKey, "ssh-key", "", "Path to the SSH private key (for example, ~/.ssh/id_ed25519)")
 
 	flag.Parse()
 
-	if config.HostsFile == "" || config.Flake == "" || config.Installer == "" {
-		log.Fatal("Usage: nixie --hosts <hosts.json> --flake <flake> --installer <installer-output>")
+	if flags.HostsFile == "" || flags.Flake == "" || flags.Installer == "" {
+		log.Fatal("usage: nixie --hosts <hosts.json> --flake <flake> --installer <installer-output>")
 	}
 
-	return config
+	return flags
 }
 
 func setupLogging(debug bool) {
@@ -41,7 +43,13 @@ func setupLogging(debug bool) {
 }
 
 func main() {
-	config := parseFlags()
-	setupLogging(config.Debug)
-	log.Debug("Parsed config", "config", config)
+	flags := parseFlags()
+	setupLogging(flags.Debug)
+	log.Debug("parsed command line flags", "flags", flags)
+
+	hostsConfig, err := hosts.LoadHostsConfig(flags.HostsFile)
+	if err != nil {
+		log.Fatal("failed to load hosts config", "error", err)
+	}
+	log.Debug("parsed hosts config", "hosts", hostsConfig)
 }

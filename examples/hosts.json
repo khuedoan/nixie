@@ -1,5 +1,8 @@
 {
     "machine1": {
         "mac_address": "bc:24:11:d0:28:34"
+    },
+    "machine2": {
+        "mac_address": "bc:24:11:0d:2f:20"
     }
 }
