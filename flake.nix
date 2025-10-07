@@ -3,71 +3,88 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    flake-utils.url = "github:numtide/flake-utils";
-    gomod2nix.url = "github:nix-community/gomod2nix";
-    gomod2nix.inputs.nixpkgs.follows = "nixpkgs";
-    gomod2nix.inputs.flake-utils.follows = "flake-utils";
+    gomod2nix = {
+      url = "github:nix-community/gomod2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      flake-utils,
       gomod2nix,
     }:
-    (flake-utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
+    let
+      system = "x86_64-linux";
 
-        callPackage = pkgs.callPackage;
-        # Simple test check added to nix flake check
-        go-test = pkgs.stdenvNoCC.mkDerivation {
-          name = "go-test";
-          dontBuild = true;
-          src = ./.;
-          doCheck = true;
-          nativeBuildInputs = with pkgs; [
-            go
-            writableTmpDirAsHomeHook
-          ];
-          checkPhase = ''
-            go test -v ./...
-          '';
-          installPhase = ''
-            mkdir "$out"
-          '';
-        };
-        # Simple lint check added to nix flake check
-        go-lint = pkgs.stdenvNoCC.mkDerivation {
-          name = "go-lint";
-          dontBuild = true;
-          src = ./.;
-          doCheck = true;
-          nativeBuildInputs = with pkgs; [
-            golangci-lint
-            go
-            writableTmpDirAsHomeHook
-          ];
-          checkPhase = ''
-            golangci-lint run
-          '';
-          installPhase = ''
-            mkdir "$out"
-          '';
-        };
-      in
-      {
-        checks = {
-          inherit go-test go-lint;
-        };
-        packages.default = callPackage ./. {
-          inherit (gomod2nix.legacyPackages.${system}) buildGoApplication;
-        };
-        devShells.default = callPackage ./shell.nix {
-          inherit (gomod2nix.legacyPackages.${system}) mkGoEnv gomod2nix;
-        };
-      }
-    ));
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [
+          (import "${gomod2nix}/overlay.nix")
+        ];
+      };
+
+      app = pkgs.buildGoApplication {
+        pname = "nixie";
+        version = "0.1";
+        src = ./.;
+        modules = ./gomod2nix.toml;
+      };
+
+      go-test = pkgs.stdenvNoCC.mkDerivation {
+        name = "go-test";
+        src = ./.;
+        dontBuild = true;
+        doCheck = true;
+        nativeBuildInputs = with pkgs; [
+          go
+          writableTmpDirAsHomeHook
+        ];
+        checkPhase = ''
+          go test -v ./...
+        '';
+        installPhase = ''
+          mkdir "$out"
+        '';
+      };
+
+      go-lint = pkgs.stdenvNoCC.mkDerivation {
+        name = "go-lint";
+        src = ./.;
+        dontBuild = true;
+        doCheck = true;
+        nativeBuildInputs = with pkgs; [
+          golangci-lint
+          go
+          writableTmpDirAsHomeHook
+        ];
+        checkPhase = ''
+          golangci-lint run
+        '';
+        installPhase = ''
+          mkdir "$out"
+        '';
+      };
+
+      goEnv = pkgs.mkGoEnv { pwd = ./.; };
+    in
+    {
+      packages.${system}.default = app;
+
+      checks.${system} = {
+        inherit go-test go-lint;
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
+        packages = [
+          goEnv
+          pkgs.gomod2nix
+          pkgs.gnumake
+          pkgs.nixfmt-tree
+          # TODO maybe embed this into the binary?
+          pkgs.nixos-anywhere
+        ];
+      };
+    };
 }

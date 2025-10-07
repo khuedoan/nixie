@@ -1,10 +1,16 @@
 .POSIX:
-.PHONY: default build fmt
+.PHONY: default build dev test fmt
 
 default: build
 
 build:
-	nix build .
+	nix build
+
+dev:
+	nix run
+
+test:
+	nix flake check
 
 fmt:
 	go fmt ./...

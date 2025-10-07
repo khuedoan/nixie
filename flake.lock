@@ -20,9 +20,7 @@
     },
     "gomod2nix": {
       "inputs": {
-        "flake-utils": [
-          "flake-utils"
-        ],
+        "flake-utils": "flake-utils",
         "nixpkgs": [
           "nixpkgs"
         ]
@@ -59,7 +57,6 @@
     },
     "root": {
       "inputs": {
-        "flake-utils": "flake-utils",
         "gomod2nix": "gomod2nix",
         "nixpkgs": "nixpkgs"
       }
