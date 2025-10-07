@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"code.khuedoan.com/nixie/internal/hosts"
+	"code.khuedoan.com/nixie/internal/network"
 	"code.khuedoan.com/nixie/internal/nixos"
 	"code.khuedoan.com/nixie/internal/serve"
 
@@ -27,7 +28,7 @@ func parseFlags() Flags {
 	var flags Flags
 
 	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug logging")
-	flag.StringVar(&flags.Address, "address", "0.0.0.0", "Address to listen on")
+	flag.StringVar(&flags.Address, "address", "", "Address to listen on (default auto)")
 	flag.StringVar(&flags.Flake, "flake", "", "NixOS configuration flake (for example, .)")
 	flag.StringVar(&flags.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
 	flag.StringVar(&flags.Installer, "installer", "", "NixOS installer flake output (for example, .#nixosConfigurations.installer)")
@@ -59,6 +60,17 @@ func main() {
 	}
 	log.Debug("parsed hosts config", "hosts", hostsConfig)
 
+	var address string
+	if flags.Address == "" {
+		address, err = network.DetectServerAddress()
+		if err != nil {
+			log.Fatal("failed to detect server address, please specify --address manually")
+		}
+	} else {
+		address = flags.Address
+	}
+	log.Debug("detected server IP", "address", address)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -70,7 +82,7 @@ func main() {
 	log.Debug("installer components", "kernel", installerComponents.Kernel, "initrd", installerComponents.Initrd, "init", installerComponents.Init)
 
 	pxeServer, err := serve.NewPXEServer(
-		flags.Address,
+		address,
 		installerComponents.Kernel,
 		installerComponents.Initrd,
 		installerComponents.Init,
@@ -85,7 +97,7 @@ func main() {
 			log.Fatal("failed to start PXE server", "error", err)
 		}
 	}()
-	log.Info("PXE server started", "address", flags.Address)
+	log.Info("PXE server started", "address", address)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
