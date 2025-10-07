@@ -8,7 +8,7 @@ build:
 
 dev:
 	nix run . -- \
-		--installer ./examples#installer \
+		--installer ./examples#nixosConfigurations.installer \
 		--flake ./examples \
 		--hosts ./examples/hosts.json \
 		--ssh-key ~/.ssh/id_ed25519 \
