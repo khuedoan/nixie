@@ -14,6 +14,7 @@ import (
 )
 
 type PXEBooter struct {
+	Address     string
 	Kernel      string
 	Initrd      string
 	Init        string
@@ -26,7 +27,7 @@ func (b *PXEBooter) BootSpec(m pixiecore.Machine) (*pixiecore.Spec, error) {
 			return &pixiecore.Spec{
 				Kernel:  pixiecore.ID("kernel"),
 				Initrd:  []pixiecore.ID{"initrd"},
-				Cmdline: fmt.Sprintf("init=%s loglevel=4 nixie_mac_address=%s", b.Init, m.MAC),
+				Cmdline: fmt.Sprintf("init=%s loglevel=4 nixie_mac_address=%s nixie_api=%s:5000", b.Init, m.MAC, b.Address),
 			}, nil
 		}
 	}
@@ -86,6 +87,7 @@ func NewPXEServer(address, kernel, initrd, init string, hostsConfig hosts.HostsC
 	}
 
 	booter := &PXEBooter{
+		Address:     address,
 		Kernel:      kernel,
 		Initrd:      initrd,
 		Init:        init,
