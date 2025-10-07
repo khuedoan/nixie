@@ -3,14 +3,33 @@ package hosts
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 )
 
 type Host struct {
-	MACAddress string `json:"mac_address"`
+	MACAddress net.HardwareAddr `json:"mac_address"`
 }
 
 type HostsConfig map[string]Host
+
+func (h *Host) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		MACAddress string `json:"mac_address"`
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	mac, err := net.ParseMAC(aux.MACAddress)
+	if err != nil {
+		return fmt.Errorf("invalid MAC address %q: %w", aux.MACAddress, err)
+	}
+
+	h.MACAddress = mac
+	return nil
+}
 
 func LoadHostsConfig(filename string) (HostsConfig, error) {
 	data, err := os.ReadFile(filename)
