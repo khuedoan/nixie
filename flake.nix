@@ -37,6 +37,26 @@
     {
       packages.${system}.default = app;
 
+      nixosModules.nixie-agent =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        {
+          systemd.services.nixie-agent = {
+            description = "Nixie Agent";
+            wantedBy = [ "multi-user.target" ];
+            serviceConfig = {
+              # TODO we can probably refine the package to nixie-agent only,
+              # which should reduce ~12MB on the installer
+              ExecStart = "${self.packages.${system}.default}/bin/nixie-agent";
+              Restart = "on-failure";
+            };
+          };
+        };
+
       devShells.${system}.default = pkgs.mkShell {
         packages = [
           goEnv

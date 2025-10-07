@@ -7,6 +7,11 @@
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nixie = {
+      # TODO change this to a remote URL if you're building a custom installer
+      # url = "github:khuedoan/nixie";
+      url = "path:..";
+    };
   };
 
   outputs =
@@ -14,6 +19,7 @@
       self,
       nixpkgs,
       disko,
+      nixie,
     }:
     {
       nixosConfigurations = {
@@ -21,6 +27,7 @@
           system = "x86_64-linux";
           modules = [
             ./installer.nix
+            nixie.nixosModules.nixie-agent
           ];
         };
         machine1 = nixpkgs.lib.nixosSystem {
