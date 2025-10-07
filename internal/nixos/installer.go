@@ -72,12 +72,5 @@ func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (Installer
 		Init:   filepath.Join(toplevelOut, "init"),
 	}
 
-	// Be defensive and check if the files exist
-	for _, p := range []string{components.Kernel, components.Initrd, components.Init} {
-		if _, err := os.Stat(p); err != nil {
-			return InstallerComponents{}, fmt.Errorf("missing installer file: %s", p)
-		}
-	}
-
 	return components, nil
 }

@@ -7,7 +7,7 @@ build:
 	nix build .
 
 dev:
-	nix run . -- \
+	sudo nix run . -- \
 		--installer ./examples#nixosConfigurations.installer \
 		--flake ./examples \
 		--hosts ./examples/hosts.json \

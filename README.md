@@ -15,6 +15,7 @@ multiple bare-metal machines based on the MAC addresses defined in
 [`./examples/hosts.json`](./examples/hosts.json).
 
 ```sh
+# Running as root for privileged ports
 sudo nixie \
     --installer ./examples#nixosConfigurations.installer \
     --flake ./examples \

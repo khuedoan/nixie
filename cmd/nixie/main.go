@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"code.khuedoan.com/nixie/internal/hosts"
 	"code.khuedoan.com/nixie/internal/nixos"
+	"code.khuedoan.com/nixie/internal/serve"
 
 	"github.com/charmbracelet/log"
 )
@@ -64,4 +68,31 @@ func main() {
 		log.Fatal("failed to build the installer", "error", err)
 	}
 	log.Debug("installer components", "kernel", installerComponents.Kernel, "initrd", installerComponents.Initrd, "init", installerComponents.Init)
+
+	pxeServer, err := serve.NewPXEServer(
+		flags.Address,
+		installerComponents.Kernel,
+		installerComponents.Initrd,
+		installerComponents.Init,
+		hostsConfig,
+	)
+	if err != nil {
+		log.Fatal("failed to create PXE server", "error", err)
+	}
+
+	go func() {
+		if err := pxeServer.Serve(); err != nil {
+			log.Fatal("failed to start PXE server", "error", err)
+		}
+	}()
+	log.Info("PXE server started", "address", flags.Address)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	sig := <-sigCh
+	log.Info("signal received, shutting down", "signal", sig)
+	pxeServer.Shutdown()
+
+	log.Info("nixie stopped gracefully")
 }
