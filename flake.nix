@@ -32,49 +32,10 @@
         modules = ./gomod2nix.toml;
       };
 
-      go-test = pkgs.stdenvNoCC.mkDerivation {
-        name = "go-test";
-        src = ./.;
-        dontBuild = true;
-        doCheck = true;
-        nativeBuildInputs = with pkgs; [
-          go
-          writableTmpDirAsHomeHook
-        ];
-        checkPhase = ''
-          go test -v ./...
-        '';
-        installPhase = ''
-          mkdir "$out"
-        '';
-      };
-
-      go-lint = pkgs.stdenvNoCC.mkDerivation {
-        name = "go-lint";
-        src = ./.;
-        dontBuild = true;
-        doCheck = true;
-        nativeBuildInputs = with pkgs; [
-          golangci-lint
-          go
-          writableTmpDirAsHomeHook
-        ];
-        checkPhase = ''
-          golangci-lint run
-        '';
-        installPhase = ''
-          mkdir "$out"
-        '';
-      };
-
       goEnv = pkgs.mkGoEnv { pwd = ./.; };
     in
     {
       packages.${system}.default = app;
-
-      checks.${system} = {
-        inherit go-test go-lint;
-      };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = [

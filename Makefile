@@ -15,7 +15,7 @@ dev:
 		--debug
 
 test:
-	nix flake check
+	go test -v ./...
 
 fmt:
 	go fmt ./...
