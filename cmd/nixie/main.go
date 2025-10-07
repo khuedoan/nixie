@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"log"
+
+	"github.com/charmbracelet/log"
 )
 
 type Config struct {
@@ -34,8 +34,14 @@ func parseFlags() Config {
 	return config
 }
 
+func setupLogging(debug bool) {
+	if debug {
+		log.SetLevel(log.DebugLevel)
+	}
+}
+
 func main() {
 	config := parseFlags()
-	fmt.Println("TODO nixie CLI")
-	fmt.Printf("%+v\n", config)
+	setupLogging(config.Debug)
+	log.Debug("Parsed config", "config", config)
 }

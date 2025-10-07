@@ -11,7 +11,8 @@ dev:
 		--installer ./examples#installer \
 		--flake ./examples \
 		--hosts ./examples/hosts.json \
-		--ssh-key ~/.ssh/id_ed25519
+		--ssh-key ~/.ssh/id_ed25519 \
+		--debug
 
 test:
 	nix flake check
