@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
 	"time"
+
+	"code.khuedoan.com/nixie/internal/serve"
 )
 
 func ping(address string) error {
@@ -38,4 +43,36 @@ func ping(address string) error {
 			backoff = maxBackoff
 		}
 	}
+}
+
+func install(address string, installRequest serve.InstallRequest) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	body, err := json.Marshal(&installRequest)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Post(
+		fmt.Sprintf("http://%s/install", address),
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("install request failed: %s", resp.Status)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("failed to read response body: %v", err)
+	} else {
+		log.Printf("successfully requested installation: %s", string(respBody))
+	}
+
+	return err
 }

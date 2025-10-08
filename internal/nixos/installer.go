@@ -38,6 +38,7 @@ func nixBuild(ctx context.Context, flakeOutput string, debug bool) (string, erro
 }
 
 func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (InstallerComponents, error) {
+	// TODO there might be some race condition here if we update the flake/installer content while an existing build is running, causing mismatch in init path and the actual one in the installer
 	kernelOut, err := nixBuild(
 		ctx,
 		flakeRef+".config.system.build.kernel",

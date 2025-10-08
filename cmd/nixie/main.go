@@ -77,11 +77,6 @@ func main() {
 		}
 	}()
 
-	// TODO IMPORTANT obviously, should be API call
-	// TODO IMPORTANT support SSH key
-	log.Info("installing NixOS", "host", "192.168.1.8", "flake", "./examples#machine1")
-	nixos.Install(ctx, "./examples#machine1", "root", "192.168.1.8", "nixos-installer", flags.Debug)
-
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 

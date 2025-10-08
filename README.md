@@ -13,12 +13,12 @@ Currently, only `x86_64-linux` is supported.
 - [x] Simple, declarative JSON configuration
 - [x] Build a custom NixOS installer from a flake
 - [x] Built-in PXE server based on [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) to serve netboot components from the custom installer
+- [x] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
 - [ ] Custom agent and API to manage the installation process
-- [ ] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
 - [ ] Remote power-on with [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN)
 - [ ] Host status check with IP discovery
 - [x] Stateless and ephemeral [^1]
-- [ ] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
+- [x] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
 
 [^1]: No pre-configured PXE server is required to install other machines - you
     only need to run Nixie on your laptop or workstation. This solves the

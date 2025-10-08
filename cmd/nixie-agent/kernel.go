@@ -6,23 +6,23 @@ import (
 	"strings"
 )
 
-type NixieParams struct {
-	MAC string
-	API string
+type AgentConfig struct {
+	MACAddress string
+	APIAddress string
 }
 
-func getNixieParams() (*NixieParams, error) {
+func getAgentConfig() (*AgentConfig, error) {
 	data, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
 		return nil, err
 	}
 
 	params := parseKernelParams(string(data))
-	nixieParams := &NixieParams{
-		MAC: params["nixie_mac_address"],
-		API: params["nixie_api"],
+	nixieParams := &AgentConfig{
+		MACAddress: params["nixie_mac_address"],
+		APIAddress: params["nixie_api"],
 	}
-	if nixieParams.MAC == "" || nixieParams.API == "" {
+	if nixieParams.MACAddress == "" || nixieParams.APIAddress == "" {
 		return nil, errors.New("missing required kernel parameters: nixie_mac_address or nixie_api")
 	}
 

@@ -2,33 +2,72 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 
 	"code.khuedoan.com/nixie/internal/hosts"
+	"code.khuedoan.com/nixie/internal/nixos"
 	"github.com/charmbracelet/log"
 )
 
 type API struct {
+	ctx         context.Context
 	hostsConfig hosts.HostsConfig
+	debug       bool
+}
+
+type InstallRequest struct {
+	MACAddress string
 }
 
 func (api *API) ping(w http.ResponseWriter, r *http.Request) {
-	log.Info("received ping from agent", "ip", extractClientIP(r))
+	ip := extractClientIP(r)
+	log.Info("received ping from agent", "ip", ip)
 	io.WriteString(w, "pong")
+}
+
+func (api *API) install(w http.ResponseWriter, r *http.Request) {
+	var installRequest InstallRequest
+	if err := json.NewDecoder(r.Body).Decode(&installRequest); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	ip := extractClientIP(r)
+	log.Info("received install request from agent", "ip", ip, "request", installRequest)
+	// TODO IMPORTANT lookup flake name based on mac address
+	flake := "./examples#machine1"
+
+	log.Info("installing NixOS", "host", ip, "flake", flake)
+	go func() {
+		// TODO IMPORTANT support SSH key
+		if err := nixos.Install(api.ctx, "./examples#machine1", "root", ip, "nixos-installer", api.debug); err != nil {
+			log.Error("failed to install NixOS", "ip", ip, "flake", flake, "error", err)
+		} else {
+			log.Info("successfully installed NixOS", "ip", ip, "flake", flake)
+		}
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	io.WriteString(w, "installation started")
 }
 
 func (api *API) router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", api.ping)
+	mux.HandleFunc("POST /install", api.install)
 
 	return mux
 }
 
 func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, debug bool) error {
 	api := &API{
+		ctx:         ctx,
 		hostsConfig: hostsConfig,
+		debug:       debug,
 	}
 
 	server := &http.Server{
