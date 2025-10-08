@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 type API struct {
 	ctx         context.Context
 	hostsConfig hosts.HostsConfig
+	flake       string
 	debug       bool
 }
 
@@ -38,8 +40,13 @@ func (api *API) install(w http.ResponseWriter, r *http.Request) {
 
 	ip := extractClientIP(r)
 	log.Info("received install request from agent", "ip", ip, "request", installRequest)
-	// TODO IMPORTANT lookup flake name based on mac address
-	flake := "./examples#machine1"
+	flakeOutput, err := hosts.GetFlakeOutputByMAC(installRequest.MACAddress, api.hostsConfig)
+	if err != nil {
+		log.Error("failed to get flake by MAC address", "err", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	flake := fmt.Sprintf("%s#%s", api.flake, flakeOutput)
 
 	log.Info("installing NixOS", "host", ip, "flake", flake)
 	go func() {
@@ -63,10 +70,11 @@ func (api *API) router() http.Handler {
 	return mux
 }
 
-func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, debug bool) error {
+func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, flake string, debug bool) error {
 	api := &API{
 		ctx:         ctx,
 		hostsConfig: hostsConfig,
+		flake:       flake,
 		debug:       debug,
 	}
 

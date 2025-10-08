@@ -44,3 +44,12 @@ func LoadHostsConfig(filename string) (HostsConfig, error) {
 
 	return hostsConfig, nil
 }
+
+func GetFlakeOutputByMAC(macAddress string, hostsConfig HostsConfig) (string, error) {
+	for flake, config := range hostsConfig {
+		if config.MACAddress.String() == macAddress {
+			return flake, nil
+		}
+	}
+	return "", fmt.Errorf("unknown MAC address: %s", macAddress)
+}

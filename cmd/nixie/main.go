@@ -72,7 +72,7 @@ func main() {
 	log.Info("PXE server started", "address", address)
 
 	go func() {
-		if err := serve.StartAPIServer(ctx, hostsConfig, flags.Debug); err != nil {
+		if err := serve.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.Debug); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
