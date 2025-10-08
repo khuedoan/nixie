@@ -1,21 +1,33 @@
 # Nixie
 
-NixOS PXE boot install with
-[Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN),
-[Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) and
-[nixos-anywhere](https://nix-community.github.io/nixos-anywhere).
-Currently, only `x86_64-linux` is supported.
+> [!CAUTION]
+> This project is still a work in progress and will not be ready for use until
+> most of the [features](#features) below are completed.
+
+Easy NixOS PXE boot install.
 
 ## Features
 
+Currently, only `x86_64-linux` is supported.
+
 - [x] Simple, declarative JSON configuration
 - [x] Build a custom NixOS installer from a flake
-- [x] Built-in PXE server to serve netboot components from the custom installer
-- [ ] Host status check with IP discovery
-- [ ] Remote power-on with Wake-on-LAN
+- [x] Built-in PXE server based on [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) to serve netboot components from the custom installer
 - [ ] Custom agent and API to manage the installation process
-- [ ] Install NixOS from a flake using nixos-anywhere
-- [x] Stateless
+- [ ] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
+- [ ] Remote power-on with [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN)
+- [ ] Host status check with IP discovery
+- [x] Stateless and ephemeral [^1]
+- [ ] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
+
+[^1]: No pre-configured PXE server is required to install other machines - you
+    only need to run Nixie on your laptop or workstation. This solves the
+    "first machine in the data center" problem: in bare-metal setups with
+    persistent PXE servers, you would otherwise need to automate the installation
+    of the PXE server itself.
+[^2]: Using the provided examples with a warm cache. Factors that affect the
+    speed include whether the configuration has been cached in the Nix store,
+    the size of the NixOS configuration, the network speed, etc.
 
 ## Usage
 
@@ -92,3 +104,18 @@ sequenceDiagram
 
     Note over Nixie: Return when all machines are installed
 ```
+
+## Acknowledgements
+
+This project is a rewrite of my previous ephemeral PXE server implementation in
+my [khuedoan/homelab](https://github.com/khuedoan/homelab) repository, which
+used a stateless PXE server in Docker with Ansible templating and targeted
+generic Linux distributions. It has been rebuilt from the ground up for NixOS,
+offering a more integrated and robust experience in this project. All credits
+from the previous implementation are also referenced here, as similar knowledge
+and concepts apply.
+
+- Ephemeral PXE server [^1] inspired by [Minimal First Machine in the DC](https://speakerdeck.com/amcguign/minimal-first-machine-in-the-dc)
+- [NixOS netboot with pixiecore](https://nixos.wiki/wiki/Netboot)
+- [The Pixiecore library](https://github.com/danderson/netboot/tree/main/pixiecore)
+- Custom agent for the installation process inspired by [OpenStack ironic-python-agent](https://opendev.org/openstack/ironic-python-agent) and [Tinkerbell Worker](https://tinkerbell.org/docs/services/tink-worker)
