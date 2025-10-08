@@ -72,11 +72,10 @@ func main() {
 	log.Info("PXE server started", "address", address)
 
 	go func() {
-		if err := serve.StartAPIServer(ctx, flags.Debug); err != nil {
+		if err := serve.StartAPIServer(ctx, hostsConfig, flags.Debug); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
-	log.Info("API server started", "address", address)
 
 	// TODO IMPORTANT obviously, should be API call
 	// TODO IMPORTANT support SSH key
