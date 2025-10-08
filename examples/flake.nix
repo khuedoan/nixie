@@ -40,6 +40,16 @@
             }
           ];
         };
+        machine2 = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          modules = [
+            disko.nixosModules.disko
+            ./configuration.nix
+            {
+              networking.hostName = "machine2";
+            }
+          ];
+        };
       };
     };
 }

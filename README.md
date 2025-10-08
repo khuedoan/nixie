@@ -25,9 +25,10 @@ Currently, only `x86_64-linux` is supported.
     "first machine in the data center" problem: in bare-metal setups with
     persistent PXE servers, you would otherwise need to automate the installation
     of the PXE server itself.
-[^2]: Using the provided examples with a warm cache. Factors that affect the
-    speed include whether the configuration has been cached in the Nix store,
-    the size of the NixOS configuration, the network speed, etc.
+[^2]: Using the provided examples with a warm cache on a 1 Gbps network.
+    Factors that affect the speed include whether the configuration has been
+    cached in the Nix store, the size of the NixOS configuration, the network
+    speed, etc.
 
 ## Usage
 
