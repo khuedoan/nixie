@@ -9,6 +9,7 @@ import (
 
 // Adapted from Pixiecore's DHCP logic (Apache License 2.0)
 // https://github.com/danderson/netboot/blob/main/pixiecore/dhcp.go#L247-L278
+// We need this because the nixie-agent also needs to know the API server address to send its API requests
 func DetectServerAddress() (string, error) {
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {

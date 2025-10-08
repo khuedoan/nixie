@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,43 +14,16 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-type Flags struct {
-	Address   string
-	Debug     bool
-	Flake     string
-	HostsFile string
-	Installer string
-	SSHKey    string
-}
-
-func parseFlags() Flags {
-	var flags Flags
-
-	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug logging")
-	flag.StringVar(&flags.Address, "address", "", "Address to listen on (default auto)")
-	flag.StringVar(&flags.Flake, "flake", "", "NixOS configuration flake (for example, .)")
-	flag.StringVar(&flags.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
-	flag.StringVar(&flags.Installer, "installer", "", "NixOS installer flake output (for example, .#nixosConfigurations.installer)")
-	flag.StringVar(&flags.SSHKey, "ssh-key", "", "Path to the SSH private key (for example, ~/.ssh/id_ed25519)")
-
-	flag.Parse()
-
-	if flags.HostsFile == "" || flags.Flake == "" || flags.Installer == "" {
-		log.Fatal("usage: nixie --hosts <hosts.json> --flake <flake> --installer <installer-output>")
+func main() {
+	flags, err := parseFlags()
+	if err != nil {
+		log.Fatal("failed to parse command-line flags", "error", err)
 	}
 
-	return flags
-}
-
-func setupLogging(debug bool) {
-	if debug {
+	if flags.Debug {
 		log.SetLevel(log.DebugLevel)
 	}
-}
 
-func main() {
-	flags := parseFlags()
-	setupLogging(flags.Debug)
 	log.Debug("parsed command line flags", "flags", flags)
 
 	hostsConfig, err := hosts.LoadHostsConfig(flags.HostsFile)
@@ -98,6 +70,13 @@ func main() {
 		}
 	}()
 	log.Info("PXE server started", "address", address)
+
+	go func() {
+		if err := serve.StartAPIServer(ctx, flags.Debug); err != nil {
+			log.Fatal("failed to start API server", "error", err)
+		}
+	}()
+	log.Info("API server started", "address", address)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

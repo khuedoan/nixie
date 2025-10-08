@@ -11,7 +11,7 @@ type NixieParams struct {
 	API string
 }
 
-func GetNixieParams() (*NixieParams, error) {
+func getNixieParams() (*NixieParams, error) {
 	data, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
 		return nil, err
