@@ -14,7 +14,6 @@ Currently, only `x86_64-linux` is supported.
 - [x] Build a custom NixOS installer from a flake
 - [x] Built-in PXE server based on [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) to serve netboot components from the custom installer
 - [x] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
-- [ ] Custom agent and API to manage the installation process
 - [ ] Remote power-on with [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN)
 - [ ] Host status check with IP discovery
 - [x] Stateless and ephemeral [^1]
