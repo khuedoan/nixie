@@ -1,5 +1,7 @@
 # Nixie
 
+<img width="272" height="240" alt="image" src="https://github.com/user-attachments/assets/7621ef6f-3cf4-45df-bb1a-e19511f2d536" />
+
 Open-source bare metal provisioning engine for NixOS. Nixie enables zero-touch
 deployment of NixOS to multiple machines over the network, turning blank hard
 drives into fully configured systems in minutes.
