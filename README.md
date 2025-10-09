@@ -1,10 +1,18 @@
 # Nixie
 
-> [!CAUTION]
-> This project is still a work in progress and will not be ready for use until
-> most of the [features](#features) below are completed.
+Open-source bare metal provisioning engine for NixOS. Nixie enables zero-touch
+deployment of NixOS to multiple machines over the network, turning blank hard
+drives into fully configured systems in minutes.
 
-Easy NixOS PXE boot install.
+> [!WARNING]
+> Basic [features](#features) are functional and you can try them out, but some
+> parts are still missing and there are known issues.
+
+Nixie is a simpler, stateless alternative to [Foreman](https://theforeman.org),
+[MAAS](https://canonical.com/maas), [OpenStack
+Ironic](https://docs.openstack.org/ironic),
+[Tinkerbell](https://tinkerbell.org), etc., focusing on NixOS deployments on
+bare metal (though it can also be used in virtualized environments).
 
 ## Features
 
@@ -18,6 +26,7 @@ Currently, only `x86_64-linux` is supported.
 - [ ] Host status check with IP discovery
 - [x] Stateless and ephemeral [^1]
 - [x] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
+- [ ] Support IPv6 single-stack
 
 [^1]: No pre-configured PXE server is required to install other machines - you
     only need to run Nixie on your laptop or workstation. This solves the
@@ -107,13 +116,13 @@ sequenceDiagram
 
 ## Acknowledgements
 
-This project is a rewrite of my previous ephemeral PXE server implementation in
-my [khuedoan/homelab](https://github.com/khuedoan/homelab) repository, which
-used a stateless PXE server in Docker with Ansible templating and targeted
-generic Linux distributions. It has been rebuilt from the ground up for NixOS,
-offering a more integrated and robust experience in this project. All credits
-from the previous implementation are also referenced here, as similar knowledge
-and concepts apply.
+> This project is a rewrite of my previous ephemeral PXE server implementation
+> in my [khuedoan/homelab](https://github.com/khuedoan/homelab) repository,
+> which used a stateless PXE server in Docker with Ansible templating and
+> targeted generic Linux distributions. It has been rebuilt from the ground up
+> for NixOS, offering a more integrated and robust experience in this project.
+> All credits from the previous implementation are also referenced here, as
+> similar knowledge and concepts apply.
 
 - Ephemeral PXE server [^1] inspired by [Minimal First Machine in the DC](https://speakerdeck.com/amcguign/minimal-first-machine-in-the-dc)
 - [NixOS netboot with pixiecore](https://nixos.wiki/wiki/Netboot)
