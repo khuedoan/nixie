@@ -119,3 +119,5 @@ and concepts apply.
 - [NixOS netboot with pixiecore](https://nixos.wiki/wiki/Netboot)
 - [The Pixiecore library](https://github.com/danderson/netboot/tree/main/pixiecore)
 - Custom agent for the installation process inspired by [OpenStack ironic-python-agent](https://opendev.org/openstack/ironic-python-agent) and [Tinkerbell Worker](https://tinkerbell.org/docs/services/tink-worker)
+- Wireshark's [WakeOnLAN wiki page](https://wiki.wireshark.org/WakeOnLAN)
+- AMD's [Magic Packet Technology](https://www.amd.com/content/dam/amd/en/documents/archived-tech-docs/white-papers/20213.pdf) white paper
