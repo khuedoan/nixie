@@ -21,6 +21,7 @@ func DetectServerAddress() (string, error) {
 	// Try to find an IPv4 address to use
 	fs := [](func(net.IP) bool){
 		net.IP.IsGlobalUnicast,
+		net.IP.IsLinkLocalUnicast,
 	}
 	for _, f := range fs {
 		for _, a := range addresses {
@@ -28,6 +29,8 @@ func DetectServerAddress() (string, error) {
 			if !ok {
 				continue
 			}
+			// TODO support IPv6, probably need to fork pixiecore?
+			// Reference fork https://github.com/dmitri-d/netboot/tree/dhcpv6
 			ip := ipaddr.IP.To4()
 			if ip == nil {
 				continue

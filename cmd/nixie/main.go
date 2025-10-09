@@ -36,7 +36,7 @@ func main() {
 	if flags.Address == "" {
 		address, err = network.DetectServerAddress()
 		if err != nil {
-			log.Fatal("failed to detect server address, please specify --address manually")
+			log.Fatal("failed to detect server address, please specify --address manually", "error", err)
 		}
 	} else {
 		address = flags.Address
