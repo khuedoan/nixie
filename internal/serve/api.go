@@ -47,14 +47,24 @@ func (api *API) install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flake := fmt.Sprintf("%s#%s", api.flake, flakeOutput)
+	host := api.hostsConfig[flakeOutput]
+
+	// TODO need better condition here
+	if host.GetState() != hosts.StateUnknown {
+		http.Error(w, "installation already in progress", http.StatusConflict)
+		return
+	}
+	host.SetState(hosts.StateInstalling)
 
 	log.Info("installing NixOS", "host", ip, "flake", flake)
 	go func() {
 		// TODO IMPORTANT support SSH key
-		if err := nixos.Install(api.ctx, "./examples#machine1", "root", ip, "nixos-installer", api.debug); err != nil {
+		if err := nixos.Install(api.ctx, flake, "root", ip, "nixos-installer", api.debug); err != nil {
 			log.Error("failed to install NixOS", "ip", ip, "flake", flake, "error", err)
+			host.SetState(hosts.StateInstalled)
 		} else {
 			log.Info("successfully installed NixOS", "ip", ip, "flake", flake)
+			host.SetState(hosts.StateFailed)
 		}
 	}()
 

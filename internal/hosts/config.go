@@ -5,13 +5,26 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
+)
+
+type State int
+
+const (
+	// TODO maybe catch pixiecore events and/or ping to add booting/booted state
+	StateUnknown State = iota
+	StateInstalling
+	StateInstalled
+	StateFailed
 )
 
 type Host struct {
 	MACAddress net.HardwareAddr `json:"mac_address"`
+	State      State            `json:"-"`
+	mu         sync.RWMutex     `json:"-"`
 }
 
-type HostsConfig map[string]Host
+type HostsConfig map[string]*Host
 
 func (h *Host) UnmarshalJSON(data []byte) error {
 	var aux struct {
@@ -28,7 +41,20 @@ func (h *Host) UnmarshalJSON(data []byte) error {
 	}
 
 	h.MACAddress = mac
+	h.State = StateUnknown
 	return nil
+}
+
+func (h *Host) GetState() State {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.State
+}
+
+func (h *Host) SetState(state State) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.State = state
 }
 
 func LoadHostsConfig(filename string) (HostsConfig, error) {
