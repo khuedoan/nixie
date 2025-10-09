@@ -71,8 +71,9 @@ func main() {
 	}()
 	log.Info("PXE server started", "address", address)
 
+	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := serve.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.Debug); err != nil {
+		if err := serve.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.Debug, doneCh); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
@@ -80,8 +81,13 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	sig := <-sigCh
-	log.Info("signal received, shutting down", "signal", sig)
+	select {
+	case sig := <-sigCh:
+		log.Info("signal received, shutting down", "signal", sig)
+	case <-doneCh:
+		log.Info("all hosts installed, shutting down")
+	}
+
 	pxeServer.Shutdown()
 
 	log.Info("nixie stopped gracefully")

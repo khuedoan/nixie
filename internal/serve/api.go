@@ -18,6 +18,7 @@ type API struct {
 	hostsConfig hosts.HostsConfig
 	flake       string
 	debug       bool
+	doneCh      chan struct{}
 }
 
 type InstallRequest struct {
@@ -66,6 +67,16 @@ func (api *API) install(w http.ResponseWriter, r *http.Request) {
 			log.Info("successfully installed NixOS", "ip", ip, "flake", flake)
 			host.SetState(hosts.StateInstalled)
 		}
+
+		if hosts.AllInstalled(api.hostsConfig) {
+			log.Debug("all hosts installed, signaling completion")
+			select {
+			case api.doneCh <- struct{}{}:
+				log.Debug("completion signal sent", "channel", "doneCh")
+			default:
+				log.Debug("completion already signaled, skipping")
+			}
+		}
 	}()
 
 	w.WriteHeader(http.StatusAccepted)
@@ -80,12 +91,13 @@ func (api *API) router() http.Handler {
 	return mux
 }
 
-func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, flake string, debug bool) error {
+func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, flake string, debug bool, doneCh chan struct{}) error {
 	api := &API{
 		ctx:         ctx,
 		hostsConfig: hostsConfig,
 		flake:       flake,
 		debug:       debug,
+		doneCh:      doneCh,
 	}
 
 	server := &http.Server{

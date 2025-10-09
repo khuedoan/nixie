@@ -79,3 +79,13 @@ func GetFlakeOutputByMAC(macAddress string, hostsConfig HostsConfig) (string, er
 	}
 	return "", fmt.Errorf("unknown MAC address: %s", macAddress)
 }
+
+func AllInstalled(hostsConfig HostsConfig) bool {
+	for _, host := range hostsConfig {
+		if host.GetState() != StateInstalled {
+			return false
+		}
+	}
+
+	return true
+}
