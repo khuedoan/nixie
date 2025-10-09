@@ -61,10 +61,10 @@ func (api *API) install(w http.ResponseWriter, r *http.Request) {
 		// TODO IMPORTANT support SSH key
 		if err := nixos.Install(api.ctx, flake, "root", ip, "nixos-installer", api.debug); err != nil {
 			log.Error("failed to install NixOS", "ip", ip, "flake", flake, "error", err)
-			host.SetState(hosts.StateInstalled)
+			host.SetState(hosts.StateFailed)
 		} else {
 			log.Info("successfully installed NixOS", "ip", ip, "flake", flake)
-			host.SetState(hosts.StateFailed)
+			host.SetState(hosts.StateInstalled)
 		}
 	}()
 
