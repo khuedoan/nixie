@@ -2,7 +2,7 @@
 
 **Open-source bare metal provisioning engine for NixOS.**
 
-<img width="272" height="240" alt="image" src="https://github.com/user-attachments/assets/7621ef6f-3cf4-45df-bb1a-e19511f2d536" />
+<img width="189" height="189" alt="Nixie logo" src="https://github.com/user-attachments/assets/c3b70fc4-1568-46e8-abd7-bd7dad41f754" />
 
 > [!WARNING]
 > Basic [features](#features) are functional and you can try them out, but some
