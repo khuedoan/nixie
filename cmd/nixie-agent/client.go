@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"code.khuedoan.com/nixie/internal/serve"
+	"code.khuedoan.com/nixie/internal/api"
 )
 
 func ping(address string) error {
@@ -45,7 +45,7 @@ func ping(address string) error {
 	}
 }
 
-func install(address string, installRequest serve.InstallRequest) error {
+func install(address string, installRequest api.InstallRequest) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := json.Marshal(&installRequest)
 	if err != nil {

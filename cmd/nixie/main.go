@@ -6,10 +6,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"code.khuedoan.com/nixie/internal/api"
 	"code.khuedoan.com/nixie/internal/hosts"
 	"code.khuedoan.com/nixie/internal/network"
 	"code.khuedoan.com/nixie/internal/nixos"
-	"code.khuedoan.com/nixie/internal/serve"
+	"code.khuedoan.com/nixie/internal/pxe"
 
 	"github.com/charmbracelet/log"
 )
@@ -53,7 +54,7 @@ func main() {
 	}
 	log.Debug("installer components", "kernel", installerComponents.Kernel, "initrd", installerComponents.Initrd, "init", installerComponents.Init)
 
-	pxeServer, err := serve.NewPXEServer(
+	pxeServer, err := pxe.NewPXEServer(
 		address,
 		installerComponents.Kernel,
 		installerComponents.Initrd,
@@ -73,7 +74,7 @@ func main() {
 
 	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := serve.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.Debug, doneCh); err != nil {
+		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.Debug, doneCh); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()

@@ -1,14 +1,15 @@
 # Nixie
 
-<img width="272" height="240" alt="image" src="https://github.com/user-attachments/assets/7621ef6f-3cf4-45df-bb1a-e19511f2d536" />
+**Open-source bare metal provisioning engine for NixOS.**
 
-Open-source bare metal provisioning engine for NixOS. Nixie enables zero-touch
-deployment of NixOS to multiple machines over the network, turning blank hard
-drives into fully configured systems in minutes.
+<img width="272" height="240" alt="image" src="https://github.com/user-attachments/assets/7621ef6f-3cf4-45df-bb1a-e19511f2d536" />
 
 > [!WARNING]
 > Basic [features](#features) are functional and you can try them out, but some
 > parts are still missing and there are known issues.
+
+Nixie enables zero-touch deployment of NixOS to multiple machines over the
+network, turning blank hard drives into fully configured systems in minutes.
 
 Nixie is a simpler, stateless alternative to [Foreman](https://theforeman.org),
 [MAAS](https://canonical.com/maas), [OpenStack

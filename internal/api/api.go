@@ -1,4 +1,4 @@
-package serve
+package api
 
 import (
 	"context"

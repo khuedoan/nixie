@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"code.khuedoan.com/nixie/internal/serve"
+	"code.khuedoan.com/nixie/internal/api"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 	}
 	log.Printf("successfully sent ping to API server")
 
-	installRequest := serve.InstallRequest{
+	installRequest := api.InstallRequest{
 		MACAddress: params.MACAddress,
 	}
 	if err = install(params.APIAddress, installRequest); err != nil {
