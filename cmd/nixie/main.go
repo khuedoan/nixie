@@ -79,6 +79,12 @@ func main() {
 		}
 	}()
 
+	// TODO probably need a better place to put these, maybe one go routine to manage each machine
+	for _, host := range hostsConfig {
+		log.Info("sending magic packet", "mac", host.MACAddress)
+		network.SendWakeOnLAN(host.MACAddress)
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
