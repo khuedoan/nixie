@@ -1,5 +1,5 @@
 .POSIX:
-.PHONY: default build dev test fmt
+.PHONY: default build dev test test-e2e fmt
 
 default: build
 
@@ -17,6 +17,9 @@ dev:
 
 test:
 	go test -v ./...
+
+test-e2e:
+	sudo env PATH="$$PATH" nix run --print-build-logs .#e2e
 
 fmt:
 	go fmt ./...

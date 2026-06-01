@@ -69,12 +69,45 @@
         subPackages = [ "./cmd/nixie-agent" ];
       };
 
+      python = pkgs.python3.withPackages (
+        ps: with ps; [
+          cryptography
+        ]
+      );
+
+      e2eRunner = pkgs.writeShellApplication {
+        name = "nixie-e2e";
+        runtimeInputs = with pkgs; [
+          dnsmasq
+          git
+          iproute2
+          nix
+          nixos-anywhere
+          opentelemetry-collector
+          openssh
+          OVMF.fd
+          python
+          qemu_kvm
+        ];
+        text = ''
+          export NIXIE_BIN="${app}/bin/nixie"
+          export OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"
+          export OVMF_VARS="${pkgs.OVMF.fd}/FV/OVMF_VARS.fd"
+          exec ${python}/bin/python3 "${self.outPath}/tests/e2e.py" "$@"
+        '';
+      };
+
       goEnv = pkgs.mkGoEnv { pwd = ./.; };
     in
     {
       packages.${system} = {
         default = app;
         nixie-agent = agent;
+      };
+
+      apps.${system}.e2e = {
+        type = "app";
+        program = "${e2eRunner}/bin/nixie-e2e";
       };
 
       nixosModules.nixie-agent =
