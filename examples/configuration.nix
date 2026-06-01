@@ -1,4 +1,4 @@
-{ modulesPath, ... }:
+{ lib, modulesPath, ... }:
 
 {
   imports = [
@@ -39,6 +39,7 @@
 
   boot = {
     loader = {
+      timeout = 0;
       systemd-boot = {
         enable = true;
       };
@@ -48,6 +49,10 @@
     };
   };
 
+  documentation.enable = false;
+  environment.defaultPackages = lib.mkForce [ ];
+  programs.command-not-found.enable = false;
+
   services = {
     openssh = {
       enable = true;
@@ -55,7 +60,7 @@
   };
 
   users.users.root.openssh.authorizedKeys.keys = [
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN5ue4np7cF34f6dwqH1262fPjkowHQ8irfjVC156PCG"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKUqWIwmajrM8WR6qzlenfRoAbaNTrpBd49uh9/2gkA9"
   ];
 
   system.stateVersion = "25.05";
