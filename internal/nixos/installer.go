@@ -9,6 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type InstallerComponents struct {
@@ -18,6 +23,9 @@ type InstallerComponents struct {
 }
 
 func nixBuild(ctx context.Context, flakeOutput string, debug bool) (string, error) {
+	_, span := otel.Tracer("nixie").Start(ctx, "nix.build", trace.WithAttributes(attribute.String("nix.flake_output", flakeOutput)))
+	defer span.End()
+
 	cmd := exec.CommandContext(ctx, "nix", "build", "--no-link", "--print-out-paths", flakeOutput)
 
 	var stdout bytes.Buffer
@@ -30,7 +38,10 @@ func nixBuild(ctx context.Context, flakeOutput string, debug bool) (string, erro
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("nix build failed for %q: %w", flakeOutput, err)
+		err = fmt.Errorf("nix build failed for %q: %w", flakeOutput, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return "", err
 	}
 
 	outPath := strings.TrimSpace(stdout.String())
@@ -38,6 +49,9 @@ func nixBuild(ctx context.Context, flakeOutput string, debug bool) (string, erro
 }
 
 func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (InstallerComponents, error) {
+	ctx, span := otel.Tracer("nixie").Start(ctx, "nixie.build_installer", trace.WithAttributes(attribute.String("nixie.installer", flakeRef)))
+	defer span.End()
+
 	// TODO there might be some race condition here if we update the flake/installer content while an existing build is running, causing mismatch in init path and the actual one in the installer
 	kernelOut, err := nixBuild(
 		ctx,
@@ -45,7 +59,10 @@ func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (Installer
 		debug,
 	)
 	if err != nil {
-		return InstallerComponents{}, fmt.Errorf("failed to build kernel: %w", err)
+		err = fmt.Errorf("failed to build kernel: %w", err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return InstallerComponents{}, err
 	}
 
 	initrdOut, err := nixBuild(
@@ -55,7 +72,10 @@ func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (Installer
 	)
 
 	if err != nil {
-		return InstallerComponents{}, fmt.Errorf("failed to build initrd: %w", err)
+		err = fmt.Errorf("failed to build initrd: %w", err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return InstallerComponents{}, err
 	}
 	toplevelOut, err := nixBuild(
 		ctx,
@@ -64,7 +84,10 @@ func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (Installer
 	)
 
 	if err != nil {
-		return InstallerComponents{}, fmt.Errorf("failed to build toplevel: %w", err)
+		err = fmt.Errorf("failed to build toplevel: %w", err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return InstallerComponents{}, err
 	}
 
 	components := InstallerComponents{
