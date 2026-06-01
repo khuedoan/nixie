@@ -9,9 +9,11 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
-
-	"code.khuedoan.com/nixie/internal/api"
 )
+
+type installRequest struct {
+	MACAddress string `json:"mac_address"`
+}
 
 func ping(address string) error {
 	const maxBackoff = time.Minute
@@ -45,7 +47,7 @@ func ping(address string) error {
 	}
 }
 
-func install(address string, installRequest api.InstallRequest) error {
+func install(address string, installRequest installRequest) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := json.Marshal(&installRequest)
 	if err != nil {

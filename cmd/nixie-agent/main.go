@@ -1,10 +1,6 @@
 package main
 
-import (
-	"log"
-
-	"code.khuedoan.com/nixie/internal/api"
-)
+import "log"
 
 func main() {
 	params, err := getAgentConfig()
@@ -18,7 +14,7 @@ func main() {
 	}
 	log.Printf("successfully sent ping to API server")
 
-	installRequest := api.InstallRequest{
+	installRequest := installRequest{
 		MACAddress: params.MACAddress,
 	}
 	if err = install(params.APIAddress, installRequest); err != nil {
