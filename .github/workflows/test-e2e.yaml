@@ -1,0 +1,41 @@
+name: Test E2E
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  test-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          summarize: false
+
+      - name: Enable Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v14
+        with:
+          use-flakehub: disabled
+
+      - name: Run end-to-end test
+        id: e2e
+        run: make test-e2e
+
+      - name: Write trace summary
+        if: always()
+        run: python3 tests/summary.py "${{ steps.e2e.outcome }}" >> "$GITHUB_STEP_SUMMARY"
