@@ -2,6 +2,7 @@ package pxe
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,11 +10,22 @@ import (
 	"code.khuedoan.com/nixie/internal/hosts"
 
 	"github.com/charmbracelet/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.universe.tf/netboot/out/ipxe"
 	"go.universe.tf/netboot/pixiecore"
 )
 
+type Server struct {
+	ctx    context.Context
+	booter *PXEBooter
+	server *pixiecore.Server
+}
+
 type PXEBooter struct {
+	ctx         context.Context
 	Address     string
 	Kernel      string
 	Initrd      string
@@ -22,8 +34,26 @@ type PXEBooter struct {
 }
 
 func (b *PXEBooter) BootSpec(m pixiecore.Machine) (*pixiecore.Spec, error) {
-	for _, hostConfig := range b.HostsConfig {
+	_, span := otel.Tracer("nixie").Start(b.ctx, "pxe.boot_spec", trace.WithAttributes(
+		attribute.String("host.mac", m.MAC.String()),
+		attribute.String("pxe.arch", m.Arch.String()),
+	))
+	defer span.End()
+
+	for flakeOutput, hostConfig := range b.HostsConfig {
 		if bytes.Equal(hostConfig.MACAddress, m.MAC) {
+			span.SetAttributes(attribute.String("nix.flake_output", flakeOutput))
+			if hostConfig.GetState() != hosts.StateUnknown {
+				span.SetAttributes(
+					attribute.Bool("pxe.accepted", false),
+					attribute.String("pxe.reject_reason", "already_used"),
+				)
+				return nil, fmt.Errorf("PXE boot already used for MAC address: %s", m.MAC)
+			}
+
+			span.SetAttributes(
+				attribute.Bool("pxe.accepted", true),
+			)
 			return &pixiecore.Spec{
 				Kernel:  pixiecore.ID("kernel"),
 				Initrd:  []pixiecore.ID{"initrd"},
@@ -31,10 +61,26 @@ func (b *PXEBooter) BootSpec(m pixiecore.Machine) (*pixiecore.Spec, error) {
 			}, nil
 		}
 	}
+
+	span.SetAttributes(
+		attribute.Bool("pxe.accepted", false),
+		attribute.String("pxe.reject_reason", "unknown_mac"),
+	)
 	return nil, fmt.Errorf("unknown MAC address: %s", m.MAC)
 }
 
-func (b *PXEBooter) ReadBootFile(id pixiecore.ID) (io.ReadCloser, int64, error) {
+func (b *PXEBooter) ReadBootFile(id pixiecore.ID) (file io.ReadCloser, size int64, err error) {
+	_, span := otel.Tracer("nixie").Start(b.ctx, "pxe.read_boot_file", trace.WithAttributes(
+		attribute.String("pxe.file_id", string(id)),
+	))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
 	var path string
 	switch string(id) {
 	case "kernel":
@@ -44,6 +90,7 @@ func (b *PXEBooter) ReadBootFile(id pixiecore.ID) (io.ReadCloser, int64, error) 
 	default:
 		return nil, -1, fmt.Errorf("unknown file ID: %s", id)
 	}
+	span.SetAttributes(attribute.String("file.path", path))
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -57,15 +104,37 @@ func (b *PXEBooter) ReadBootFile(id pixiecore.ID) (io.ReadCloser, int64, error) 
 		}
 		return nil, -1, err
 	}
+	span.SetAttributes(attribute.Int64("file.size", stat.Size()))
 
 	return f, stat.Size(), nil
 }
 
-func (b *PXEBooter) WriteBootFile(id pixiecore.ID, body io.Reader) error {
+func (b *PXEBooter) WriteBootFile(_ pixiecore.ID, _ io.Reader) error {
 	return fmt.Errorf("WriteBootFile not supported")
 }
 
-func NewPXEServer(address, kernel, initrd, init string, hostsConfig hosts.HostsConfig) (*pixiecore.Server, error) {
+func (s *Server) Serve() (err error) {
+	ctx, span := otel.Tracer("nixie").Start(s.ctx, "pxe.serve", trace.WithAttributes(
+		attribute.String("server.address", s.server.Address),
+		attribute.Bool("pxe.dhcp_no_bind", s.server.DHCPNoBind),
+	))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	s.booter.ctx = ctx
+	return s.server.Serve()
+}
+
+func (s *Server) Shutdown() {
+	s.server.Shutdown()
+}
+
+func NewPXEServer(ctx context.Context, address, kernel, initrd, init string, hostsConfig hosts.HostsConfig) (*Server, error) {
 	// TODO maybe build this with a new iPXE version with Nix
 	efi64Data, err := ipxe.Asset("third_party/ipxe/src/bin-x86_64-efi/ipxe.efi")
 	if err != nil {
@@ -86,7 +155,12 @@ func NewPXEServer(address, kernel, initrd, init string, hostsConfig hosts.HostsC
 		pixiecore.FirmwareEFI64: efi64Data,
 	}
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	booter := &PXEBooter{
+		ctx:         ctx,
 		Address:     address,
 		Kernel:      kernel,
 		Initrd:      initrd,
@@ -94,7 +168,7 @@ func NewPXEServer(address, kernel, initrd, init string, hostsConfig hosts.HostsC
 		HostsConfig: hostsConfig,
 	}
 
-	server := &pixiecore.Server{
+	pixiecoreServer := &pixiecore.Server{
 		Address:    address,
 		Booter:     booter,
 		DHCPNoBind: true,
@@ -107,5 +181,9 @@ func NewPXEServer(address, kernel, initrd, init string, hostsConfig hosts.HostsC
 		},
 	}
 
-	return server, nil
+	return &Server{
+		ctx:    ctx,
+		booter: booter,
+		server: pixiecoreServer,
+	}, nil
 }
