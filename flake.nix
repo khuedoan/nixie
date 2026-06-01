@@ -25,17 +25,57 @@
         ];
       };
 
-      app = pkgs.buildGoApplication {
+      mkGoSource =
+        fileset:
+        pkgs.lib.fileset.toSource {
+          root = ./.;
+          fileset = pkgs.lib.fileset.unions (
+            fileset
+            ++ [
+              ./go.mod
+              ./go.sum
+              ./gomod2nix.toml
+            ]
+          );
+        };
+
+      appSource = mkGoSource [
+        ./cmd/nixie
+        ./internal
+      ];
+
+      agentSource = mkGoSource [
+        ./cmd/nixie-agent
+      ];
+
+      mkGoPackage =
+        { pname, src, subPackages }:
+        pkgs.buildGoApplication {
+          inherit pname subPackages;
+          version = "0.1";
+          inherit src;
+          modules = ./gomod2nix.toml;
+        };
+
+      app = mkGoPackage {
         pname = "nixie";
-        version = "0.1";
-        src = ./.;
-        modules = ./gomod2nix.toml;
+        src = appSource;
+        subPackages = [ "./cmd/nixie" ];
+      };
+
+      agent = mkGoPackage {
+        pname = "nixie-agent";
+        src = agentSource;
+        subPackages = [ "./cmd/nixie-agent" ];
       };
 
       goEnv = pkgs.mkGoEnv { pwd = ./.; };
     in
     {
-      packages.${system}.default = app;
+      packages.${system} = {
+        default = app;
+        nixie-agent = agent;
+      };
 
       nixosModules.nixie-agent =
         {
@@ -49,9 +89,7 @@
             description = "Nixie Agent";
             wantedBy = [ "multi-user.target" ];
             serviceConfig = {
-              # TODO we can probably refine the package to nixie-agent only,
-              # which should reduce ~12MB on the installer
-              ExecStart = "${self.packages.${system}.default}/bin/nixie-agent";
+              ExecStart = "${self.packages.${system}."nixie-agent"}/bin/nixie-agent";
               Restart = "on-failure";
             };
           };
