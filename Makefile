@@ -11,7 +11,8 @@ dev:
 		--installer ./examples#nixosConfigurations.installer \
 		--flake ./examples \
 		--hosts ./examples/hosts.json \
-		--ssh-key ~/.ssh/id_ed25519 \
+		--install-ssh-key ~/.ssh/nixie-install \
+		--deployment-ssh-key ~/.ssh/nixie-deployment \
 		--debug
 
 test:

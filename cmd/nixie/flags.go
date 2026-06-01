@@ -6,12 +6,13 @@ import (
 )
 
 type Flags struct {
-	Address   string
-	Debug     bool
-	Flake     string
-	HostsFile string
-	Installer string
-	SSHKey    string
+	Address          string
+	Debug            bool
+	DeploymentSSHKey string
+	Flake            string
+	HostsFile        string
+	InstallSSHKey    string
+	Installer        string
 }
 
 func parseFlags() (*Flags, error) {
@@ -19,15 +20,16 @@ func parseFlags() (*Flags, error) {
 
 	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug logging")
 	flag.StringVar(&flags.Address, "address", "", "Address to listen on (default auto)")
+	flag.StringVar(&flags.DeploymentSSHKey, "deployment-ssh-key", "", "Path to the SSH private key authorized by the installed system")
 	flag.StringVar(&flags.Flake, "flake", "", "NixOS configuration flake (for example, .)")
 	flag.StringVar(&flags.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
+	flag.StringVar(&flags.InstallSSHKey, "install-ssh-key", "", "Path to the SSH private key authorized by the installer")
 	flag.StringVar(&flags.Installer, "installer", "", "NixOS installer flake output (for example, .#nixosConfigurations.installer)")
-	flag.StringVar(&flags.SSHKey, "ssh-key", "", "Path to the SSH private key (for example, ~/.ssh/id_ed25519)")
 
 	flag.Parse()
 
-	if flags.HostsFile == "" || flags.Flake == "" || flags.Installer == "" {
-		return nil, errors.New("missing flags, usage: nixie --hosts <hosts.json> --flake <flake> --installer <installer-output>")
+	if flags.HostsFile == "" || flags.Flake == "" || flags.Installer == "" || flags.InstallSSHKey == "" || flags.DeploymentSSHKey == "" {
+		return nil, errors.New("missing flags, usage: nixie --hosts <hosts.json> --flake <flake> --installer <installer-output> --install-ssh-key <private-key> --deployment-ssh-key <private-key>")
 	}
 
 	return &flags, nil
