@@ -19,13 +19,13 @@ bare metal (though it can also be used in virtualized environments).
 
 Currently, only `x86_64-linux` is supported.
 
-- [x] Simple, declarative JSON configuration
+- [x] Simple, declarative JSON host inventory
 - [x] Build a custom NixOS installer from a flake
 - [x] Built-in PXE server based on [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) to serve netboot components from the custom installer
 - [x] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
 - [x] Remote power-on with [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN)
-- [ ] Host status check with IP discovery
-- [x] Stateless and ephemeral [^1]
+- [x] Host IP discovery via callback
+- [x] Ephemeral PXE server [^1]
 - [x] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
 - [ ] Support IPv6 single-stack
 
@@ -52,12 +52,36 @@ sudo nixie \
     --installer ./examples#nixosConfigurations.installer \
     --flake ./examples \
     --hosts ./examples/hosts.json \
-    --ssh-key ~/.ssh/id_ed25519
+    --install-ssh-key ~/.ssh/nixie-install \
+    --deployment-ssh-key ~/.ssh/nixie-deployment
 ```
 
 TODO add a demo video/asciinema.
 
-Please see the full example in [`./examples`](./examples).
+Please see the full example in [`./examples`](./examples), replace the
+authorized SSH keys in [`./examples/installer.nix`](./examples/installer.nix)
+(for `--install-ssh-key`) and
+[`./examples/configuration.nix`](./examples/configuration.nix) (for
+`--deployment-ssh-key`).
+
+After a successful installation, Nixie updates final IP and machine ID hash:
+
+```diff
+ {
+   "machine1": {
+-    "mac_address": "bc:24:11:d0:28:34"
++    "mac_address": "bc:24:11:d0:28:34",
++    "ip": "192.168.50.11",
++    "machine_id_hash": "4bb69b8af140798fdab9cc04d2a1ad994af8ac9ca82db6df3f59133880872512"
+   },
+   "machine2": {
+-    "mac_address": "bc:24:11:0d:2f:20"
++    "mac_address": "bc:24:11:0d:2f:20",
++    "ip": "192.168.50.12",
++    "machine_id_hash": "9d307ce2870d0fdeef56348ac310a8743c1a8569b5131061fa9c487c64213067"
+   }
+ }
+```
 
 ## How it works
 
@@ -105,6 +129,8 @@ sequenceDiagram
         Note over Machines: Reboot after installation completed
 
         Nixie->>Machines: nixos-anywhere confirms machine rebooted
+        Nixie->>Machines: Read final /etc/machine-id over SSH
+        Nixie->>Nixie: Write IP and machine ID hash to hosts.json
         deactivate Machines
 
         activate Machines
