@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func Install(ctx context.Context, flakeRef, user, host, sshKey string, debug bool) (err error) {
+func Install(ctx context.Context, flakeRef, user, host, sshKey, sshKeyPassphraseFile string, debug bool) (err error) {
 	target := sshTarget(user, host)
 	_, span := otel.Tracer("nixie").Start(ctx, "nixos.install", trace.WithAttributes(
 		attribute.String("net.peer.ip", host),
@@ -30,6 +30,11 @@ func Install(ctx context.Context, flakeRef, user, host, sshKey string, debug boo
 	if sshKey == "" {
 		return fmt.Errorf("install SSH key is required")
 	}
+	askpass, err := newAskpass(sshKeyPassphraseFile)
+	if err != nil {
+		return err
+	}
+	defer askpass.cleanup()
 
 	args := []string{
 		"--flake", flakeRef,
@@ -47,6 +52,7 @@ func Install(ctx context.Context, flakeRef, user, host, sshKey string, debug boo
 	}
 
 	cmd := exec.CommandContext(ctx, "nixos-anywhere", args...)
+	cmd.Env = askpass.env
 
 	if debug {
 		cmd.Stdout = os.Stdout

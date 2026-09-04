@@ -6,14 +6,16 @@ import (
 )
 
 type Flags struct {
-	Address          string
-	Debug            bool
-	DeploymentSSHKey string
-	DeploymentSSHUser string
-	Flake            string
-	HostsFile        string
-	InstallSSHKey    string
-	Installer        string
+	Address                        string
+	Debug                          bool
+	DeploymentSSHKey               string
+	DeploymentSSHKeyPassphraseFile string
+	DeploymentSSHUser              string
+	Flake                          string
+	HostsFile                      string
+	InstallSSHKey                  string
+	InstallSSHKeyPassphraseFile    string
+	Installer                      string
 }
 
 func parseFlags() (*Flags, error) {
@@ -22,10 +24,12 @@ func parseFlags() (*Flags, error) {
 	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug logging")
 	flag.StringVar(&flags.Address, "address", "", "Address to listen on (default auto)")
 	flag.StringVar(&flags.DeploymentSSHKey, "deployment-ssh-key", "", "Path to the SSH private key authorized by the installed system")
+	flag.StringVar(&flags.DeploymentSSHKeyPassphraseFile, "deployment-ssh-key-passphrase-file", "", "Path to a file containing the deployment SSH key passphrase")
 	flag.StringVar(&flags.DeploymentSSHUser, "deployment-ssh-user", "root", "SSH user for the installed system")
 	flag.StringVar(&flags.Flake, "flake", "", "NixOS configuration flake (for example, .)")
 	flag.StringVar(&flags.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
 	flag.StringVar(&flags.InstallSSHKey, "install-ssh-key", "", "Path to the SSH private key authorized by the installer")
+	flag.StringVar(&flags.InstallSSHKeyPassphraseFile, "install-ssh-key-passphrase-file", "", "Path to a file containing the installer SSH key passphrase")
 	flag.StringVar(&flags.Installer, "installer", "", "NixOS installer flake output (for example, .#nixosConfigurations.installer)")
 
 	flag.Parse()
