@@ -26,6 +26,7 @@ type API struct {
 	saveMu           sync.Mutex
 	flake            string
 	installSSHKey    string
+	deploymentSSHUser string
 	deploymentSSHKey string
 	debug            bool
 	doneCh           chan struct{}
@@ -119,7 +120,7 @@ func (api *API) installHost(ctx context.Context, host *hosts.Host, flakeOutput, 
 		return fmt.Errorf("failed to install NixOS: %w", err)
 	}
 
-	machineIDHash, err := nixos.ReadMachineIDHash(ctx, "root", ip, api.deploymentSSHKey, api.debug)
+	machineIDHash, err := nixos.ReadMachineIDHash(ctx, api.deploymentSSHUser, ip, api.deploymentSSHKey, api.debug)
 	if err != nil {
 		return fmt.Errorf("failed to read final machine ID: %w", err)
 	}
@@ -140,13 +141,14 @@ func (api *API) saveHosts() error {
 	return hosts.SaveHostsConfig(api.hostsFile, api.hostsConfig)
 }
 
-func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, hostsFile string, flake string, installSSHKey string, deploymentSSHKey string, debug bool, doneCh chan struct{}) error {
+func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, hostsFile string, flake string, installSSHKey string, deploymentSSHUser string, deploymentSSHKey string, debug bool, doneCh chan struct{}) error {
 	api := &API{
 		ctx:              ctx,
 		hostsConfig:      hostsConfig,
 		hostsFile:        hostsFile,
 		flake:            flake,
 		installSSHKey:    installSSHKey,
+		deploymentSSHUser: deploymentSSHUser,
 		deploymentSSHKey: deploymentSSHKey,
 		debug:            debug,
 		doneCh:           doneCh,
