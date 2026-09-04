@@ -21,7 +21,7 @@ const (
 	machineIDReadInterval = 2 * time.Second
 )
 
-func ReadMachineIDHash(ctx context.Context, user, host, sshKey string, debug bool) (machineIDHash string, err error) {
+func ReadMachineIDHash(ctx context.Context, user, host, sshKey, sshKeyPassphraseFile string, debug bool) (machineIDHash string, err error) {
 	ctx, span := otel.Tracer("nixie").Start(ctx, "nixos.read_machine_id_hash", trace.WithAttributes(
 		attribute.String("net.peer.ip", host),
 		attribute.String("ssh.target", sshTarget(user, host)),
@@ -44,7 +44,7 @@ func ReadMachineIDHash(ctx context.Context, user, host, sshKey string, debug boo
 
 	for {
 		attempts++
-		machineIDHash, err = readMachineIDHashOnce(ctx, user, host, sshKey, debug)
+		machineIDHash, err = readMachineIDHashOnce(ctx, user, host, sshKey, sshKeyPassphraseFile, debug)
 		if err == nil {
 			span.SetAttributes(
 				attribute.Int("ssh.attempts", attempts),
@@ -68,17 +68,26 @@ func ReadMachineIDHash(ctx context.Context, user, host, sshKey string, debug boo
 	}
 }
 
-func readMachineIDHashOnce(ctx context.Context, user, host, sshKey string, debug bool) (string, error) {
+func readMachineIDHashOnce(ctx context.Context, user, host, sshKey, sshKeyPassphraseFile string, debug bool) (string, error) {
+	askpass, err := newAskpass(sshKeyPassphraseFile)
+	if err != nil {
+		return "", err
+	}
+	defer askpass.cleanup()
+
 	args := []string{
-		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=5",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-i", sshKey,
 	}
+	if sshKeyPassphraseFile == "" {
+		args = append([]string{"-o", "BatchMode=yes"}, args...)
+	}
 	args = append(args, sshTarget(user, host), "cat /etc/machine-id")
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd.Env = askpass.env
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
