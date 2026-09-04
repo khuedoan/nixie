@@ -73,7 +73,7 @@ func main() {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	checkInstalledHosts(ctx, hostsConfig, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.DeploymentSSHKeyPassphraseFile, flags.Debug)
+	checkInstalledHosts(ctx, hostsConfig, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug)
 	if hosts.AllInstalled(hostsConfig) {
 		log.Info("all hosts are already installed")
 		return
@@ -110,7 +110,7 @@ func main() {
 
 	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := api.StartAPIServer(ctx, hostsConfig, flags.HostsFile, flags.Flake, flags.InstallSSHKey, flags.InstallSSHKeyPassphraseFile, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.DeploymentSSHKeyPassphraseFile, flags.Debug, doneCh); err != nil {
+		if err := api.StartAPIServer(ctx, hostsConfig, flags.HostsFile, flags.Flake, flags.InstallSSHKey, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
@@ -155,7 +155,7 @@ func main() {
 	log.Info("nixie stopped gracefully")
 }
 
-func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig, deploymentSSHUser string, deploymentSSHKey string, deploymentSSHKeyPassphraseFile string, debug bool) {
+func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig, deploymentSSHUser string, deploymentSSHKey string, sshAgentSocket string, debug bool) {
 	var wg sync.WaitGroup
 	for name, host := range hostsConfig {
 		storedIP := host.IP
@@ -176,7 +176,7 @@ func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig, dep
 
 			checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			machineIDHash, err := nixos.ReadMachineIDHash(checkCtx, deploymentSSHUser, storedIP, deploymentSSHKey, deploymentSSHKeyPassphraseFile, debug)
+			machineIDHash, err := nixos.ReadMachineIDHash(checkCtx, deploymentSSHUser, storedIP, deploymentSSHKey, sshAgentSocket, debug)
 			if err != nil {
 				log.Warn("failed to check installed host, skipping reinstall", "host", name, "ip", storedIP, "error", err)
 				return
