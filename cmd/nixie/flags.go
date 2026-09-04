@@ -9,6 +9,7 @@ type Flags struct {
 	Address          string
 	Debug            bool
 	DeploymentSSHKey string
+	DeploymentSSHUser string
 	Flake            string
 	HostsFile        string
 	InstallSSHKey    string
@@ -21,6 +22,7 @@ func parseFlags() (*Flags, error) {
 	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug logging")
 	flag.StringVar(&flags.Address, "address", "", "Address to listen on (default auto)")
 	flag.StringVar(&flags.DeploymentSSHKey, "deployment-ssh-key", "", "Path to the SSH private key authorized by the installed system")
+	flag.StringVar(&flags.DeploymentSSHUser, "deployment-ssh-user", "root", "SSH user for the installed system")
 	flag.StringVar(&flags.Flake, "flake", "", "NixOS configuration flake (for example, .)")
 	flag.StringVar(&flags.HostsFile, "hosts", "", "Path to hosts.json file (for example, ./hosts.json)")
 	flag.StringVar(&flags.InstallSSHKey, "install-ssh-key", "", "Path to the SSH private key authorized by the installer")
