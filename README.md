@@ -56,6 +56,23 @@ sudo nixie \
     --deployment-ssh-key ~/.ssh/nixie-deployment
 ```
 
+If the machine that runs Nixie has a firewall, open these ports:
+
+```nix
+# NixOS configuration example
+networking.firewall = {
+  allowedTCPPorts = [
+    80 # Kernel and initrd over HTTP
+    5000 # Nixie agent API
+  ];
+  allowedUDPPorts = [
+    67 # ProxyDHCP
+    69 # iPXE binary over TFTP
+    4011 # PXE boot service
+  ];
+};
+```
+
 TODO add a demo video/asciinema.
 
 Please see the full example in [`./examples`](./examples), replace the
