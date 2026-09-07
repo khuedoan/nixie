@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func Install(ctx context.Context, flakeRef, user, host, sshKey string, debug bool) (err error) {
+func Install(ctx context.Context, flakeRef, user, host, sshKey, sshAgentSocket string, debug bool) (err error) {
 	target := sshTarget(user, host)
 	_, span := otel.Tracer("nixie").Start(ctx, "nixos.install", trace.WithAttributes(
 		attribute.String("net.peer.ip", host),
@@ -47,6 +47,7 @@ func Install(ctx context.Context, flakeRef, user, host, sshKey string, debug boo
 	}
 
 	cmd := exec.CommandContext(ctx, "nixos-anywhere", args...)
+	cmd.Env = sshEnv(sshAgentSocket)
 
 	if debug {
 		cmd.Stdout = os.Stdout
