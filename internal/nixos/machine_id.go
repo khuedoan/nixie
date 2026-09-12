@@ -34,8 +34,8 @@ func ReadMachineIDHash(ctx context.Context, user, host, sshKey, sshAgentSocket s
 		span.End()
 	}()
 
-	if sshKey == "" {
-		return "", fmt.Errorf("deployment SSH key is required")
+	if sshKey == "" && sshAgentSocket == "" {
+		return "", fmt.Errorf("deployment SSH key or SSH agent socket is required")
 	}
 
 	var lastErr error
@@ -74,7 +74,9 @@ func readMachineIDHashOnce(ctx context.Context, user, host, sshKey, sshAgentSock
 		"-o", "ConnectTimeout=5",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
-		"-i", sshKey,
+	}
+	if sshKey != "" {
+		args = append(args, "-i", sshKey)
 	}
 	args = append(args, sshTarget(user, host), "cat /etc/machine-id")
 
