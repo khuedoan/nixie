@@ -53,7 +53,9 @@ sudo nixie \
     --flake ./examples \
     --hosts ./examples/hosts.json \
     --install-ssh-key ~/.ssh/nixie-install \
-    --deployment-ssh-key ~/.ssh/nixie-deployment
+    --deployment-ssh-user root \
+    --deployment-ssh-key ~/.ssh/nixie-deployment \
+    --ssh-agent-socket "$SSH_AUTH_SOCK"
 ```
 
 If the machine that runs Nixie has a firewall, open these ports:
@@ -77,9 +79,12 @@ TODO add a demo video/asciinema.
 
 Please see the full example in [`./examples`](./examples), replace the
 authorized SSH keys in [`./examples/installer.nix`](./examples/installer.nix)
-(for `--install-ssh-key`) and
+(for `--install-ssh-key`) and ensure the installed system authorizes
+`--deployment-ssh-user` with
 [`./examples/configuration.nix`](./examples/configuration.nix) (for
 `--deployment-ssh-key`).
+If either SSH key is encrypted, load it into `ssh-agent` and pass the agent
+socket with `--ssh-agent-socket`.
 
 After a successful installation, Nixie updates final IP and machine ID hash:
 

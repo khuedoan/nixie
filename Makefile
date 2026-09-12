@@ -12,6 +12,7 @@ dev:
 		--flake ./examples \
 		--hosts ./examples/hosts.json \
 		--install-ssh-key ~/.ssh/nixie-install \
+		--deployment-ssh-user root \
 		--deployment-ssh-key ~/.ssh/nixie-deployment \
 		--debug
 

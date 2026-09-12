@@ -20,15 +20,17 @@ import (
 )
 
 type API struct {
-	ctx              context.Context
-	hostsConfig      hosts.HostsConfig
-	hostsFile        string
-	saveMu           sync.Mutex
-	flake            string
-	installSSHKey    string
-	deploymentSSHKey string
-	debug            bool
-	doneCh           chan struct{}
+	ctx               context.Context
+	hostsConfig       hosts.HostsConfig
+	hostsFile         string
+	saveMu            sync.Mutex
+	flake             string
+	installSSHKey     string
+	deploymentSSHUser string
+	deploymentSSHKey  string
+	sshAgentSocket    string
+	debug             bool
+	doneCh            chan struct{}
 }
 
 type InstallRequest struct {
@@ -115,11 +117,11 @@ func (api *API) installHost(ctx context.Context, host *hosts.Host, flakeOutput, 
 		span.End()
 	}()
 
-	if err := nixos.Install(ctx, flake, "root", ip, api.installSSHKey, api.debug); err != nil {
+	if err := nixos.Install(ctx, flake, "root", ip, api.installSSHKey, api.sshAgentSocket, api.debug); err != nil {
 		return fmt.Errorf("failed to install NixOS: %w", err)
 	}
 
-	machineIDHash, err := nixos.ReadMachineIDHash(ctx, "root", ip, api.deploymentSSHKey, api.debug)
+	machineIDHash, err := nixos.ReadMachineIDHash(ctx, api.deploymentSSHUser, ip, api.deploymentSSHKey, api.sshAgentSocket, api.debug)
 	if err != nil {
 		return fmt.Errorf("failed to read final machine ID: %w", err)
 	}
@@ -140,16 +142,18 @@ func (api *API) saveHosts() error {
 	return hosts.SaveHostsConfig(api.hostsFile, api.hostsConfig)
 }
 
-func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, hostsFile string, flake string, installSSHKey string, deploymentSSHKey string, debug bool, doneCh chan struct{}) error {
+func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, hostsFile string, flake string, installSSHKey string, deploymentSSHUser string, deploymentSSHKey string, sshAgentSocket string, debug bool, doneCh chan struct{}) error {
 	api := &API{
-		ctx:              ctx,
-		hostsConfig:      hostsConfig,
-		hostsFile:        hostsFile,
-		flake:            flake,
-		installSSHKey:    installSSHKey,
-		deploymentSSHKey: deploymentSSHKey,
-		debug:            debug,
-		doneCh:           doneCh,
+		ctx:               ctx,
+		hostsConfig:       hostsConfig,
+		hostsFile:         hostsFile,
+		flake:             flake,
+		installSSHKey:     installSSHKey,
+		deploymentSSHUser: deploymentSSHUser,
+		deploymentSSHKey:  deploymentSSHKey,
+		sshAgentSocket:    sshAgentSocket,
+		debug:             debug,
+		doneCh:            doneCh,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", api.ping)
