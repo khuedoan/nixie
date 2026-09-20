@@ -112,6 +112,18 @@ def wait_tcp(host, port, timeout, process=None):
     raise TimeoutError(f"timed out waiting for {host}:{port}")
 
 
+def wait_socket(path, timeout, process=None):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if process and process.poll() is not None:
+            output = read(process.log_path)[-4000:]
+            raise RuntimeError(f"{process.name} exited before {path} was ready\n{output}")
+        if path.is_socket():
+            return
+        time.sleep(0.1)
+    raise TimeoutError(f"timed out waiting for {path}")
+
+
 def wait_nixie(process):
     deadline = time.time() + TIMEOUT["install"]
     while time.time() < deadline:
@@ -152,6 +164,18 @@ def write_key(workdir):
     )
     key_path.chmod(0o600)
     return key_path
+
+
+def start_ssh_agent(key_path, workdir):
+    socket_path = (workdir / "ssh-agent.sock").resolve()
+    process = start(
+        "ssh-agent",
+        ["ssh-agent", "-D", "-a", str(socket_path)],
+        workdir / "ssh-agent.log",
+    )
+    wait_socket(socket_path, 30, process=process)
+    run(["ssh-add", str(key_path)], env=os.environ | {"SSH_AUTH_SOCK": str(socket_path)})
+    return socket_path
 
 
 def load_machines(hosts_path):
@@ -210,7 +234,7 @@ def configure_network(taps):
         run(["ip", "link", "set", tap, "up"])
 
 
-def start_services(key_path, flake_ref, hosts_path, workdir):
+def start_services(ssh_agent_socket, flake_ref, hosts_path, workdir):
     start("otelcol", ["otelcol", "--config", str(TESTS_DIR / "otelcol.yaml")], workdir / "otelcol.log", cwd=workdir)
     wait_tcp("127.0.0.1", int(OTEL_ENDPOINT.rsplit(":", 1)[1]), 30)
     start("dnsmasq", ["dnsmasq", "--keep-in-foreground", f"--conf-file={TESTS_DIR / 'dnsmasq.conf'}"], workdir / "dnsmasq.log")
@@ -218,13 +242,14 @@ def start_services(key_path, flake_ref, hosts_path, workdir):
     env = os.environ | {
         "OTEL_EXPORTER_OTLP_ENDPOINT": f"http://{OTEL_ENDPOINT}",
         "OTEL_SERVICE_NAME": "nixie",
+        "SSH_AUTH_SOCK": str(ssh_agent_socket),
     }
     cmd = [
         os.environ["NIXIE_BIN"],
         "--address", CONTROLLER_IP,
         "--installer", f"{flake_ref}#nixosConfigurations.installer",
         "--flake", flake_ref, "--hosts", str(hosts_path),
-        "--install-ssh-key", str(key_path), "--deployment-ssh-key", str(key_path), "--debug",
+        "--debug",
     ]
     return start("nixie", cmd, workdir / "nixie.log", env=env)
 
@@ -267,8 +292,9 @@ def main():
     log(f"work directory: {workdir}")
     try:
         log(f"start e2e.run host_count={len(machines)}")
+        ssh_agent_socket = start_ssh_agent(key_path, workdir)
         configure_network(taps)
-        nixie = start_services(key_path, f"./{flake}", hosts_path, workdir)
+        nixie = start_services(ssh_agent_socket, f"./{flake}", hosts_path, workdir)
         wait_tcp(CONTROLLER_IP, NIXIE_API_PORT, TIMEOUT["api"], process=nixie)
         time.sleep(2)
 
@@ -290,7 +316,7 @@ def main():
     finally:
         cleanup()
         if not passed:
-            for name in ("otelcol", "nixie", "dnsmasq"):
+            for name in ("ssh-agent", "otelcol", "nixie", "dnsmasq"):
                 print_tail(f"{name}.log", workdir / f"{name}.log", stream=sys.stderr)
         for machine in machines:
             print_tail(f"{machine['name']}.serial.log", workdir / f"{machine['name']}.serial.log")

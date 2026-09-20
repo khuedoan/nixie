@@ -77,14 +77,15 @@ networking.firewall = {
 
 TODO add a demo video/asciinema.
 
-Please see the full example in [`./examples`](./examples), replace the
-authorized SSH keys in [`./examples/installer.nix`](./examples/installer.nix)
-(for `--install-ssh-key`) and ensure the installed system authorizes
-`--deployment-ssh-user` with
-[`./examples/configuration.nix`](./examples/configuration.nix) (for
-`--deployment-ssh-key`).
-If either SSH key is encrypted, load it into `ssh-agent` and pass the agent
-socket with `--ssh-agent-socket`.
+See the full example in [`./examples`](./examples).
+
+By default, Nixie authenticates through `ssh-agent`. Ensure the agent contains
+the keys authorized by both
+[`./examples/installer.nix`](./examples/installer.nix) and the installed system
+in [`./examples/configuration.nix`](./examples/configuration.nix).
+
+You can override the agent socket with `--ssh-agent-socket`.
+Alternatively, specify the keys directly with `--install-ssh-key` and `--deployment-ssh-key`.
 
 After a successful installation, Nixie updates final IP and machine ID hash:
 

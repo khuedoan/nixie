@@ -27,8 +27,8 @@ func Install(ctx context.Context, flakeRef, user, host, sshKey, sshAgentSocket s
 		span.End()
 	}()
 
-	if sshKey == "" {
-		return fmt.Errorf("install SSH key is required")
+	if sshKey == "" && sshAgentSocket == "" {
+		return fmt.Errorf("install SSH key or SSH agent socket is required")
 	}
 
 	args := []string{
@@ -43,7 +43,9 @@ func Install(ctx context.Context, flakeRef, user, host, sshKey, sshAgentSocket s
 		// pushing from the Nix store where Nixie is running is usually faster than pulling from a remote cache over the internet.
 		// Additionally, it's air-gapped.
 		"--no-substitute-on-destination",
-		"-i", sshKey,
+	}
+	if sshKey != "" {
+		args = append(args, "-i", sshKey)
 	}
 
 	cmd := exec.CommandContext(ctx, "nixos-anywhere", args...)
