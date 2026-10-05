@@ -79,9 +79,6 @@ schema = 3
   [mod."go.opentelemetry.io/proto/otlp"]
     version = "v1.3.1"
     hash = "sha256-WaXW64jWowTDlNYDHiGKmHzRUrwJ8Rkymyvz7W6UHd8="
-  [mod."go.universe.tf/netboot"]
-    version = "v0.0.0-20240531232330-2ed7bd30206a"
-    hash = "sha256-4VaDV9lpB6QHdEWh5tsoAL2yxCQysqiWXeiiQ6gXbzQ="
   [mod."golang.org/x/crypto"]
     version = "v0.29.0"
     hash = "sha256-sqckobR2VWucCgb7xpY2wLktnAA+XyXJbhCm80yCo78="
