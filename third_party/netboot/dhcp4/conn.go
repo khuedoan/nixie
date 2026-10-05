@@ -202,22 +202,6 @@ func (c *Conn) SendDHCP(pkt *Packet, intf *net.Interface) error {
 	}
 }
 
-// SetReadDeadline sets the deadline for future Read calls.  If the
-// deadline is reached, Read will fail with a timeout (see net.Error)
-// instead of blocking.  A zero value for t means Read will not time
-// out.
-func (c *Conn) SetReadDeadline(t time.Time) error {
-	return c.conn.SetReadDeadline(t)
-}
-
-// SetWriteDeadline sets the deadline for future Write calls.  If the
-// deadline is reached, Write will fail with a timeout (see net.Error)
-// instead of blocking.  A zero value for t means Write will not time
-// out.
-func (c *Conn) SetWriteDeadline(t time.Time) error {
-	return c.conn.SetWriteDeadline(t)
-}
-
 type portableConn struct {
 	conn *ipv4.PacketConn
 }

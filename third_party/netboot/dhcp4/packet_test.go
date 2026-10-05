@@ -17,13 +17,48 @@ package dhcp4
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 
 	"go.universe.tf/netboot/pcap"
 )
+
+// debugString prints the contents of a DHCP packet for human consumption.
+func debugString(p *Packet) string {
+	var b bytes.Buffer
+	bcast := "Unicast"
+	if p.Broadcast {
+		bcast = "Broadcast"
+	}
+	fmt.Fprintf(&b, `%s
+  %#v
+  %s
+  MAC: %s
+  ClientIP: %s
+  YourIP: %s
+  ServerIP: %s
+  RelayIP: %s
+
+  BootServerName: %s
+  BootFilename: %s
+
+  Options:
+`, p.Type, p.TransactionID, bcast, p.HardwareAddr, p.ClientAddr, p.YourAddr, p.ServerAddr, p.RelayAddr, p.BootServerName, p.BootFilename)
+
+	var opts []int
+	for n := range p.Options {
+		opts = append(opts, int(n))
+	}
+	sort.Ints(opts)
+	for _, n := range opts {
+		fmt.Fprintf(&b, "    %d: %#v\n", n, p.Options[Option(n)])
+	}
+	return b.String()
+}
 
 func udpFromPcap(fname string) ([][]byte, error) {
 	f, err := os.Open(fname)
@@ -68,7 +103,7 @@ func TestParse(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Parsing DHCP packet #%d: %s", i+1, err)
 		}
-		pkts.WriteString(pkt.DebugString())
+		pkts.WriteString(debugString(pkt))
 		pkts.WriteString("======\n")
 	}
 

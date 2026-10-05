@@ -69,8 +69,6 @@ func (s *Server) servePXE(conn net.PacketConn) error {
 			continue
 		}
 
-		s.machineEvent(pkt.HardwareAddr, machineStatePXE, "Sent PXE configuration")
-
 		resp, err := s.offerPXE(pkt, serverIP, fwtype)
 		if err != nil {
 			s.log("PXE", "Failed to construct PXE offer for %s (%s): %s", pkt.HardwareAddr, addr, err)

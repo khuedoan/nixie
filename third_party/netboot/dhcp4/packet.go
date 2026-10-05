@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sort"
 )
 
 var magic = []byte{99, 130, 83, 99}
@@ -101,39 +100,6 @@ func (p *Packet) txType() txType {
 	default:
 		return txHardwareAddr
 	}
-}
-
-// DebugString prints the contents of a DHCP packet for human consumption.
-func (p *Packet) DebugString() string {
-	var b bytes.Buffer
-	bcast := "Unicast"
-	if p.Broadcast {
-		bcast = "Broadcast"
-	}
-	fmt.Fprintf(&b, `%s
-  %#v
-  %s
-  MAC: %s
-  ClientIP: %s
-  YourIP: %s
-  ServerIP: %s
-  RelayIP: %s
-
-  BootServerName: %s
-  BootFilename: %s
-
-  Options:
-`, p.Type, p.TransactionID, bcast, p.HardwareAddr, p.ClientAddr, p.YourAddr, p.ServerAddr, p.RelayAddr, p.BootServerName, p.BootFilename)
-
-	var opts []int
-	for n := range p.Options {
-		opts = append(opts, int(n))
-	}
-	sort.Ints(opts)
-	for _, n := range opts {
-		fmt.Fprintf(&b, "    %d: %#v\n", n, p.Options[Option(n)])
-	}
-	return b.String()
 }
 
 // Marshal returns the wire encoding of p.

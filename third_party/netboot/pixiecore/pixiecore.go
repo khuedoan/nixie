@@ -20,7 +20,6 @@ import (
 	"io"
 	"net"
 	"strings"
-	"sync"
 	"text/template"
 
 	"go.universe.tf/netboot/dhcp4"
@@ -192,9 +191,6 @@ type Server struct {
 	UIAssetsDir string
 
 	errs chan error
-
-	eventsMu sync.Mutex
-	events   map[string][]machineEvent
 }
 
 // Serve listens for machines attempting to boot, and uses Booter to
@@ -241,7 +237,6 @@ func (s *Server) Serve() error {
 		return err
 	}
 
-	s.events = make(map[string][]machineEvent)
 	// 5 buffer slots, one for each goroutine, plus one for
 	// Shutdown(). We only ever pull the first error out, but shutdown
 	// will likely generate some spurious errors from the other

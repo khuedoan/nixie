@@ -90,22 +90,6 @@ type Server struct {
 	Dial func(network, addr string) (net.Conn, error)
 }
 
-// ListenAndServe listens on the UDP network address addr and then
-// calls Serve to handle TFTP requests. If addr is blank, ":69" is
-// used.
-func (s *Server) ListenAndServe(addr string) error {
-	if addr == "" {
-		addr = ":69"
-	}
-	l, err := net.ListenPacket("udp", addr)
-	if err != nil {
-		return err
-	}
-	defer l.Close()
-	s.infoLog("TFTP listening on %s", l.LocalAddr())
-	return s.Serve(l)
-}
-
 // Serve accepts requests on listener l, creating a new transfer
 // goroutine for each. The transfer goroutines use s.Handler to get
 // bytes, and transfers them to the client.

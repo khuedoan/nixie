@@ -54,7 +54,7 @@ func testConn(t *testing.T, impl conn, addr string) {
 	go func() {
 		s.Write(bs)
 	}()
-	if err = c.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+	if err = c.conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	rpkt, intf, err := c.RecvDHCP()

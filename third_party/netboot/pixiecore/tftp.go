@@ -60,7 +60,7 @@ func extractInfo(path string) (net.HardwareAddr, int, error) {
 }
 
 func (s *Server) logTFTPTransfer(clientAddr net.Addr, path string, err error) {
-	mac, _, pathErr := extractInfo(path)
+	_, _, pathErr := extractInfo(path)
 	if pathErr != nil {
 		s.log("TFTP", "unable to extract mac from request:%v", pathErr)
 		return
@@ -69,7 +69,6 @@ func (s *Server) logTFTPTransfer(clientAddr net.Addr, path string, err error) {
 		s.log("TFTP", "Send of %q to %s failed: %s", path, clientAddr, err)
 	} else {
 		s.log("TFTP", "Sent %q to %s", path, clientAddr)
-		s.machineEvent(mac, machineStateTFTP, "Sent iPXE to %s", clientAddr)
 	}
 }
 

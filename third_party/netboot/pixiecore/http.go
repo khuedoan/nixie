@@ -111,7 +111,6 @@ func (s *Server) handleIpxe(w http.ResponseWriter, r *http.Request) {
 
 	s.log("HTTP", "Sending ipxe boot script to %s", r.RemoteAddr)
 	start = time.Now()
-	s.machineEvent(mac, machineStateIpxeScript, "Sent iPXE boot script")
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(script)
 	s.debug("HTTP", "Writing ipxe script to %s took %s", mac, time.Since(start))
@@ -142,23 +141,6 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log("HTTP", "Sent file %q to %s", name, r.RemoteAddr)
-
-	switch r.URL.Query().Get("type") {
-	case "kernel":
-		mac, err := net.ParseMAC(r.URL.Query().Get("mac"))
-		if err != nil {
-			s.log("HTTP", "File fetch provided invalid MAC address %q", r.URL.Query().Get("mac"))
-			return
-		}
-		s.machineEvent(mac, machineStateKernel, "Sent kernel %q", name)
-	case "initrd":
-		mac, err := net.ParseMAC(r.URL.Query().Get("mac"))
-		if err != nil {
-			s.log("HTTP", "File fetch provided invalid MAC address %q", r.URL.Query().Get("mac"))
-			return
-		}
-		s.machineEvent(mac, machineStateInitrd, "Sent initrd %q", name)
-	}
 }
 
 func (s *Server) handleBooting(w http.ResponseWriter, r *http.Request) {
@@ -166,18 +148,6 @@ func (s *Server) handleBooting(w http.ResponseWriter, r *http.Request) {
 	// the boot script deletes this image immediately after
 	// downloading.
 	fmt.Fprintf(w, "# Booting")
-
-	macStr := r.URL.Query().Get("mac")
-	if macStr == "" {
-		s.debug("HTTP", "Bad request %q from %s, missing MAC address", r.URL, r.RemoteAddr)
-		return
-	}
-	mac, err := net.ParseMAC(macStr)
-	if err != nil {
-		s.debug("HTTP", "Bad request %q from %s, invalid MAC address %q (%s)", r.URL, r.RemoteAddr, macStr, err)
-		return
-	}
-	s.machineEvent(mac, machineStateBooted, "Booting into OS")
 }
 
 func ipxeScript(mach Machine, spec *Spec, serverHost string) ([]byte, error) {

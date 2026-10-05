@@ -20,6 +20,7 @@ import (
 
 // TODO rebuild this with a newer iPXE version with Nix
 // Current binary copied from danderson/netboot
+//
 //go:embed firmware/ipxe-x86_64.efi
 var ipxeEFI64 []byte
 

@@ -15,7 +15,9 @@
 package tftp
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -26,6 +28,13 @@ import (
 	"testing"
 	"time"
 )
+
+// constantHandler serves bs for all requested paths.
+func constantHandler(bs []byte) Handler {
+	return func(path string, clientAddr net.Addr) (io.ReadCloser, int64, error) {
+		return ioutil.NopCloser(bytes.NewBuffer(bs)), int64(len(bs)), nil
+	}
+}
 
 var testFile = strings.Repeat(`This is a test file.
 
@@ -53,19 +62,19 @@ func TestInterop(t *testing.T) {
 
 	servers := []*Server{
 		{
-			Handler:     ConstantHandler([]byte(testFile)),
+			Handler:     constantHandler([]byte(testFile)),
 			InfoLog:     infoLog,
 			TransferLog: transferLog,
 		},
 		{
-			Handler:     ConstantHandler([]byte(testFile)),
+			Handler:     constantHandler([]byte(testFile)),
 			InfoLog:     infoLog,
 			TransferLog: transferLog,
 			// This Server clamps to a smaller block size.
 			MaxBlockSize: 500,
 		},
 		{
-			Handler:     ConstantHandler([]byte(testFile)),
+			Handler:     constantHandler([]byte(testFile)),
 			InfoLog:     infoLog,
 			TransferLog: transferLog,
 			// Lower block size to send more packets

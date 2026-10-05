@@ -51,16 +51,10 @@ func (s *Server) serveDHCP(conn *dhcp4.Conn) error {
 		}
 		if spec == nil {
 			s.debug("DHCP", "No boot spec for %s, ignoring boot request", pkt.HardwareAddr)
-			s.machineEvent(pkt.HardwareAddr, machineStateIgnored, "Machine should not netboot")
 			continue
 		}
 
 		s.log("DHCP", "Offering to boot %s", pkt.HardwareAddr)
-		if fwtype == FirmwarePixiecoreIpxe {
-			s.machineEvent(pkt.HardwareAddr, machineStateProxyDHCPIpxe, "Offering to boot iPXE")
-		} else {
-			s.machineEvent(pkt.HardwareAddr, machineStateProxyDHCP, "Offering to boot")
-		}
 
 		// Machine should be booted.
 		serverIP, err := interfaceIP(intf)

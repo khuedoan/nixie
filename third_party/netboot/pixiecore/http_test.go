@@ -50,7 +50,6 @@ func TestIpxe(t *testing.T) {
 		Booter: booterFunc(booter),
 		Log:    log,
 		Debug:  log,
-		events: make(map[string][]machineEvent),
 	}
 
 	// Successful boot

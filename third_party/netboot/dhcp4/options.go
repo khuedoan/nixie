@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"sort"
 )
 
@@ -128,15 +127,6 @@ func (o Options) Marshal() ([]byte, error) {
 	return ret.Bytes(), nil
 }
 
-// Copy returns a shallow copy of o.
-func (o Options) Copy() Options {
-	ret := make(Options, len(o))
-	for k, v := range o {
-		ret[k] = v
-	}
-	return ret
-}
-
 // marshalLimited serializes o into w. If nBytes > 0, as many options
 // as possible are packed into that many bytes, inserting padding as
 // needed, and the remaining unwritten options are returned.
@@ -218,68 +208,4 @@ func (o Options) Uint16(n Option) (uint16, error) {
 		return 0, errOptionWrongSize
 	}
 	return binary.BigEndian.Uint16(bs), nil
-}
-
-// Uint32 returns the value of option n as a uint32.
-func (o Options) Uint32(n Option) (uint32, error) {
-	bs, err := o.Bytes(n)
-	if err != nil {
-		return 0, err
-	}
-	if len(bs) != 4 {
-		return 0, errOptionWrongSize
-	}
-	return binary.BigEndian.Uint32(bs), nil
-}
-
-// Int32 returns the value of option n as an int32.
-func (o Options) Int32(n Option) (int32, error) {
-	bs, err := o.Bytes(n)
-	if err != nil {
-		return 0, err
-	}
-	if len(bs) != 4 {
-		return 0, errOptionWrongSize
-	}
-	return int32(binary.BigEndian.Uint32(bs)), nil
-}
-
-// IPs returns the value of option n as a list of IPv4 addresses.
-func (o Options) IPs(n Option) ([]net.IP, error) {
-	bs, err := o.Bytes(n)
-	if err != nil {
-		return nil, err
-	}
-	if len(bs) < 4 || len(bs)%4 != 0 {
-		return nil, errOptionWrongSize
-	}
-	ret := make([]net.IP, 0, len(bs)/4)
-	for i := 0; i < len(bs); i += 4 {
-		ret = append(ret, net.IP(bs[i:i+4]))
-	}
-	return ret, nil
-}
-
-// IP returns the value of option n as an IPv4 address.
-func (o Options) IP(n Option) (net.IP, error) {
-	ips, err := o.IPs(n)
-	if err != nil {
-		return nil, err
-	}
-	if len(ips) != 1 {
-		return nil, errOptionWrongSize
-	}
-	return ips[0], nil
-}
-
-// IPMask returns the value of option n as a net.IPMask.
-func (o Options) IPMask(n Option) (net.IPMask, error) {
-	bs := o[n]
-	if bs == nil {
-		return nil, fmt.Errorf("option %d not found", n)
-	}
-	if len(bs) != 4 {
-		return nil, fmt.Errorf("option %d is the wrong size for an IPMask", n)
-	}
-	return net.IPMask(bs), nil
 }
