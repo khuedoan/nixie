@@ -9,13 +9,13 @@ import (
 	"os"
 
 	"code.khuedoan.com/nixie/internal/hosts"
+	"code.khuedoan.com/nixie/internal/netboot/pixiecore"
 
 	"github.com/charmbracelet/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"go.universe.tf/netboot/pixiecore"
 )
 
 // TODO rebuild this with a newer iPXE version with Nix

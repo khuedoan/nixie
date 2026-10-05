@@ -24,7 +24,7 @@ import (
 	"sort"
 	"testing"
 
-	"go.universe.tf/netboot/pcap"
+	"code.khuedoan.com/nixie/internal/netboot/pcap"
 )
 
 // debugString prints the contents of a DHCP packet for human consumption.

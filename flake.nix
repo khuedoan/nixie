@@ -55,9 +55,6 @@
           version = "0.1";
           inherit src;
           modules = ./gomod2nix.toml;
-          # Needed so gomod2nix can wire local `replace` directives (see
-          # `replace go.universe.tf/netboot => ./third_party/netboot` in go.mod).
-          pwd = ./.;
         };
 
       app = mkGoPackage {

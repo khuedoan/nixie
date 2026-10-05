@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net"
 
-	"go.universe.tf/netboot/dhcp4"
+	"code.khuedoan.com/nixie/internal/netboot/dhcp4"
 )
 
 func (s *Server) serveDHCP(conn *dhcp4.Conn) error {

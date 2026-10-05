@@ -24,13 +24,13 @@ import (
 	"strconv"
 	"strings"
 
-	"go.universe.tf/netboot/tftp"
+	"code.khuedoan.com/nixie/internal/netboot/tftp"
 )
 
 func (s *Server) serveTFTP(l net.PacketConn) error {
 	ts := tftp.Server{
 		Handler:     s.handleTFTP,
-		InfoLog:     func(msg string) { s.debug("TFTP", msg) },
+		InfoLog:     func(msg string) { s.debug("TFTP", "%s", msg) },
 		TransferLog: s.logTFTPTransfer,
 	}
 	err := ts.Serve(l)

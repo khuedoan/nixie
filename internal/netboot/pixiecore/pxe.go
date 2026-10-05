@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net"
 
-	"go.universe.tf/netboot/dhcp4"
+	"code.khuedoan.com/nixie/internal/netboot/dhcp4"
 	"golang.org/x/net/ipv4"
 )
 
