@@ -3,16 +3,14 @@
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use dhcproto::v4::{DhcpOption, Flags, Message, MessageType, Opcode};
-use tiny_http::{Header, Response};
 use tracing::{debug, info, warn};
 
 use crate::hosts::{HostsConfig, State};
@@ -20,6 +18,7 @@ use crate::mac::MacAddr;
 use crate::netboot::booter::{Architecture, BootSpec, Booter, Machine};
 use crate::netboot::dhcp::{self, Firmware};
 use crate::netboot::http::{ipxe_script, query_param};
+use crate::netboot::http_server::{self, Response as HttpResponse};
 use crate::netboot::tftp::TftpServer;
 
 pub const PORT_TFTP: u16 = 69;
@@ -78,7 +77,6 @@ pub struct PxeServer {
     booter: Arc<dyn Booter>,
     ipxe: BTreeMap<Firmware, Vec<u8>>,
     shutdown: Arc<AtomicBool>,
-    http_server: Mutex<Option<Arc<tiny_http::Server>>>,
 }
 
 impl PxeServer {
@@ -92,7 +90,6 @@ impl PxeServer {
             booter,
             ipxe,
             shutdown: Arc::new(AtomicBool::new(false)),
-            http_server: Mutex::new(None),
         }
     }
 
@@ -109,11 +106,8 @@ impl PxeServer {
     /// Start serving and block until [`PxeServer::shutdown`] is called or a
     /// component fails.
     pub fn serve(&self) -> Result<()> {
-        let http = Arc::new(
-            tiny_http::Server::http(SocketAddr::new(self.address, PORT_HTTP))
-                .map_err(|e| anyhow::anyhow!("HTTP server: {e}"))?,
-        );
-        *self.http_server.lock().unwrap() = Some(Arc::clone(&http));
+        let http_listener = TcpListener::bind(SocketAddr::new(self.address, PORT_HTTP))
+            .context("binding HTTP socket")?;
 
         let tftp_socket = UdpSocket::bind(SocketAddr::new(self.address, PORT_TFTP))
             .context("binding TFTP socket")?;
@@ -125,10 +119,12 @@ impl PxeServer {
 
         {
             let shutdown = Arc::clone(&self.shutdown);
-            let server = Arc::clone(&http);
             let booter = Arc::clone(&self.booter);
             spawn(&error_tx, "HTTP", move || {
-                serve_http(server, booter, shutdown)
+                let handler: http_server::Handler = Arc::new(move |method, target, host| {
+                    handle_http(booter.as_ref(), method, target, host)
+                });
+                http_server::serve(http_listener, handler, shutdown).context("HTTP server")
             });
         }
         {
@@ -175,9 +171,6 @@ impl PxeServer {
 
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Relaxed);
-        if let Some(server) = self.http_server.lock().unwrap().as_ref() {
-            server.unblock();
-        }
     }
 }
 
@@ -201,114 +194,69 @@ fn open_dhcp_socket() -> Result<crate::netboot::socket::RawDhcpSocket> {
 
 // --- HTTP ------------------------------------------------------------------------------------
 
-fn serve_http(
-    server: Arc<tiny_http::Server>,
-    booter: Arc<dyn Booter>,
-    shutdown: Arc<AtomicBool>,
-) -> Result<()> {
-    for request in server.incoming_requests() {
-        if shutdown.load(Ordering::Relaxed) {
-            break;
-        }
-        let url = request.url().to_string();
-        let path = url.split('?').next().unwrap_or("").to_string();
-        let result: Result<()> = match path.as_str() {
-            "/_/ipxe" => handle_ipxe(request, booter.as_ref(), &url),
-            "/_/file" => handle_file(request, booter.as_ref(), &url),
-            "/_/booting" => {
-                let _ = request.respond(Response::from_string("# Booting"));
-                Ok(())
-            }
-            _ => {
-                let _ = request.respond(Response::empty(404));
-                Ok(())
-            }
-        };
-        if let Err(error) = result {
-            debug!(%error, "error responding to HTTP request");
-        }
+fn handle_http(booter: &dyn Booter, method: &str, target: &str, host: &str) -> HttpResponse {
+    if method != "GET" {
+        return HttpResponse::text(405, "method not allowed");
     }
-    Ok(())
+    let path = target.split('?').next().unwrap_or("");
+    match path {
+        "/_/ipxe" => handle_ipxe(booter, target, host),
+        "/_/file" => handle_file(booter, target),
+        "/_/booting" => HttpResponse::text(200, "# Booting"),
+        _ => HttpResponse::text(404, "not found"),
+    }
 }
 
-fn handle_ipxe(request: tiny_http::Request, booter: &dyn Booter, url: &str) -> Result<()> {
+fn handle_ipxe(booter: &dyn Booter, url: &str, host: &str) -> HttpResponse {
     let Some(mac) = query_param(url, "mac") else {
-        return respond_text(request, 400, "missing MAC address parameter");
+        return HttpResponse::text(400, "missing MAC address parameter");
     };
     let Some(arch) = query_param(url, "arch") else {
-        return respond_text(request, 400, "missing architecture parameter");
+        return HttpResponse::text(400, "missing architecture parameter");
     };
     let mac: MacAddr = match mac.parse() {
         Ok(value) => value,
-        Err(_) => return respond_text(request, 400, "invalid MAC address"),
+        Err(_) => return HttpResponse::text(400, "invalid MAC address"),
     };
     let arch = match arch.parse::<u8>() {
         Ok(0) => Architecture::IA32,
         Ok(1) => Architecture::X64,
-        _ => return respond_text(request, 400, "unknown architecture"),
+        _ => return HttpResponse::text(400, "unknown architecture"),
     };
 
     let machine = Machine { mac, arch };
     let spec = match booter.boot_spec(machine) {
         Ok(Some(spec)) => spec,
-        Ok(None) => return respond_text(request, 404, "you don't netboot"),
+        Ok(None) => return HttpResponse::text(404, "you don't netboot"),
         Err(error) => {
             warn!(%error, "couldn't get a boot spec");
-            return respond_text(request, 500, "couldn't get a bootspec");
+            return HttpResponse::text(500, "couldn't get a bootspec");
         }
     };
 
-    let host = request
-        .headers()
-        .iter()
-        .find(|header| header.field.as_str().as_str().eq_ignore_ascii_case("host"))
-        .map(|header| header.value.as_str().to_string())
-        .unwrap_or_else(|| {
-            request
-                .remote_addr()
-                .map(|a| a.to_string())
-                .unwrap_or_default()
-        });
-
-    let script = match ipxe_script(machine, &spec, &host) {
+    let script = match ipxe_script(machine, &spec, host) {
         Ok(script) => script,
         Err(error) => {
             warn!(%error, "failed to assemble ipxe script");
-            return respond_text(request, 500, "couldn't get a boot script");
+            return HttpResponse::text(500, "couldn't get a boot script");
         }
     };
 
-    info!(addr = ?request.remote_addr(), "sending ipxe boot script");
-    let header = Header::from_bytes("Content-Type", "text/plain").unwrap();
-    request.respond(Response::from_data(script).with_header(header))?;
-    Ok(())
+    info!("sending ipxe boot script");
+    HttpResponse::bytes(200, "text/plain", script)
 }
 
-fn handle_file(request: tiny_http::Request, booter: &dyn Booter, url: &str) -> Result<()> {
+fn handle_file(booter: &dyn Booter, url: &str) -> HttpResponse {
     let Some(name) = query_param(url, "name") else {
-        return respond_text(request, 400, "missing filename");
+        return HttpResponse::text(400, "missing filename");
     };
-    let (mut file, size) = match booter.read_boot_file(&name) {
-        Ok(value) => value,
+    match booter.read_boot_file(&name) {
+        Ok((file, size)) => HttpResponse::file(file, size),
         Err(error) => {
             warn!(%error, %name, "error getting file");
-            return respond_text(request, 500, "couldn't get file");
+            HttpResponse::text(500, "couldn't get file")
         }
-    };
-    let mut data = Vec::with_capacity(size as usize);
-    file.read_to_end(&mut data)?;
-    let header = Header::from_bytes("Content-Length", size.to_string()).unwrap();
-    request.respond(Response::from_data(data).with_header(header))?;
-    Ok(())
-}
-
-fn respond_text(request: tiny_http::Request, status: u16, message: &str) -> Result<()> {
-    request.respond(
-        Response::from_string(message)
-            .with_status_code(status)
-            .with_header(Header::from_bytes("Content-Type", "text/plain").unwrap()),
-    )?;
-    Ok(())
+    }
 }
 
 // --- TFTP path parsing -----------------------------------------------------------------------

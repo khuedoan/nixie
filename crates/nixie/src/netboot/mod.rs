@@ -7,6 +7,7 @@
 pub mod booter;
 pub mod dhcp;
 pub mod http;
+pub mod http_server;
 pub mod tftp;
 
 #[cfg(target_os = "linux")]
