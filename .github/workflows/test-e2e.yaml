@@ -45,3 +45,11 @@ jobs:
       - name: Write trace summary
         if: always()
         run: python3 tests/summary.py "${{ steps.e2e.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nixie-e2e-trace
+          path: trace.json
+          if-no-files-found: warn
