@@ -138,6 +138,9 @@ impl PxeServer {
             "pxe.dhcp_no_bind" = true,
         )
         .entered();
+        // Entered in the HTTP handler threads so `pxe.boot_spec` and
+        // `pxe.read_boot_file` nest under `pxe.serve`, as they did in Go.
+        let serve_span = tracing::Span::current();
 
         let http_listener = TcpListener::bind(SocketAddr::new(self.address, PORT_HTTP))
             .context("binding HTTP socket")?;
@@ -149,21 +152,24 @@ impl PxeServer {
         let dhcp_socket = open_dhcp_socket()?;
 
         let (error_tx, error_rx) = mpsc::channel();
+        let mut handles = Vec::new();
 
         {
             let shutdown = Arc::clone(&self.shutdown);
             let booter = Arc::clone(&self.booter);
-            spawn(&error_tx, "HTTP", move || {
+            let serve_span = serve_span.clone();
+            handles.push(spawn(&error_tx, "HTTP", move || {
                 let handler: http_server::Handler = Arc::new(move |method, target, host| {
+                    let _guard = serve_span.enter();
                     handle_http(booter.as_ref(), method, target, host)
                 });
                 http_server::serve(http_listener, handler, shutdown).context("HTTP server")
-            });
+            }));
         }
         {
             let shutdown = Arc::clone(&self.shutdown);
             let ipxe = self.ipxe.clone();
-            spawn(&error_tx, "TFTP", move || {
+            handles.push(spawn(&error_tx, "TFTP", move || {
                 let handler = Arc::new(move |path: &str| -> Result<(Vec<u8>, u64)> {
                     let (mac, firmware) = parse_tftp_path(path)?;
                     let _ = mac;
@@ -175,31 +181,46 @@ impl PxeServer {
                 });
                 TftpServer::new(handler).serve(tftp_socket, shutdown);
                 Ok(())
-            });
+            }));
         }
         {
             let shutdown = Arc::clone(&self.shutdown);
             let address = self.address;
             let ipxe = self.ipxe.clone();
-            spawn(&error_tx, "PXE", move || {
+            handles.push(spawn(&error_tx, "PXE", move || {
                 serve_pxe(pxe_socket, address, ipxe, shutdown)
-            });
+            }));
         }
         {
             let shutdown = Arc::clone(&self.shutdown);
             let booter = Arc::clone(&self.booter);
-            spawn(&error_tx, "DHCP", move || {
+            let serve_span = serve_span.clone();
+            handles.push(spawn(&error_tx, "DHCP", move || {
+                let _guard = serve_span.enter();
                 serve_dhcp(dhcp_socket, booter, PORT_HTTP, shutdown)
-            });
+            }));
         }
 
+        let mut failure = None;
         while !self.shutdown.load(Ordering::Relaxed) {
             if let Ok(error) = error_rx.try_recv() {
-                return Err(error);
+                failure = Some(error);
+                break;
             }
             std::thread::sleep(Duration::from_millis(200));
         }
-        Ok(())
+
+        // Signal the workers and wait for them, so the `pxe.serve` span they
+        // hold a clone of closes before the process flushes traces.
+        self.shutdown.store(true, Ordering::Relaxed);
+        for handle in handles {
+            let _ = handle.join();
+        }
+
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     pub fn shutdown(&self) {
@@ -211,13 +232,13 @@ fn spawn(
     error_tx: &mpsc::Sender<anyhow::Error>,
     name: &'static str,
     task: impl FnOnce() -> Result<()> + Send + 'static,
-) {
+) -> std::thread::JoinHandle<()> {
     let error_tx = error_tx.clone();
     std::thread::spawn(move || {
         if let Err(error) = task() {
             let _ = error_tx.send(error.context(format!("{name} server stopped")));
         }
-    });
+    })
 }
 
 fn open_dhcp_socket() -> Result<crate::netboot::socket::RawDhcpSocket> {

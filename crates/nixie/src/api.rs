@@ -114,7 +114,9 @@ impl Api {
 
         let api = Arc::clone(self);
         let flake_output_for_task = flake_output.clone();
+        let parent = tracing::Span::current();
         std::thread::spawn(move || {
+            let _guard = parent.enter();
             if let Err(error) = api.install_host(&host, &flake_output_for_task, &flake, &ip) {
                 error!(%error, %ip, "failed to install host");
                 host.set_state(State::Failed);
@@ -198,9 +200,14 @@ pub fn start_api_server(api: Api) -> Result<()> {
     info!(%address, "starting API server");
 
     let api = Arc::new(api);
+    let parent = tracing::Span::current();
     for request in server.incoming_requests() {
         let api = Arc::clone(&api);
-        std::thread::spawn(move || api.handle(request));
+        let parent = parent.clone();
+        std::thread::spawn(move || {
+            let _guard = parent.enter();
+            api.handle(request);
+        });
     }
 
     warn!("API server stopped");

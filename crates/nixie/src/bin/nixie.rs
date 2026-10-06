@@ -51,13 +51,15 @@ fn main() -> ExitCode {
 }
 
 fn run(flags: &Flags) -> anyhow::Result<()> {
-    let _span = info_span!(
+    let run_span = info_span!(
         "nixie.run",
         "nixie.installer" = %flags.installer,
         "nixie.flake" = %flags.flake,
         "nixie.hosts_file" = %flags.hosts,
-    )
-    .entered();
+    );
+    // Entered on the main thread, and cloned into the server threads below so
+    // their spans nest under `nixie.run` like the Go context tree did.
+    let _run_guard = run_span.clone().entered();
 
     let hosts_config = hosts::load_hosts_config(&flags.hosts)?;
     debug!(?flags, "parsed command line flags");
@@ -104,7 +106,11 @@ fn run(flags: &Flags) -> anyhow::Result<()> {
 
     let serve_handle = {
         let server = Arc::clone(&server);
-        std::thread::spawn(move || server.serve())
+        let parent = run_span.clone();
+        std::thread::spawn(move || {
+            let _guard = parent.enter();
+            server.serve()
+        })
     };
     info!(%address, "PXE server started");
 
@@ -120,7 +126,9 @@ fn run(flags: &Flags) -> anyhow::Result<()> {
         debug: flags.debug,
         done_tx,
     });
+    let parent = run_span.clone();
     std::thread::spawn(move || {
+        let _guard = parent.enter();
         if let Err(error) = start_api_server(api) {
             error!(%error, "API server failed");
         }

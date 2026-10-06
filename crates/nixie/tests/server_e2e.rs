@@ -122,6 +122,9 @@ fn tftp_fetch(server: &str, port: u16, path: &str) -> Vec<u8> {
 #[test]
 #[ignore = "requires CAP_NET_RAW/CAP_NET_ADMIN; run inside `unshare -Urn`"]
 fn serves_boot_script_tftp_dhcp_and_api() {
+    // Set OTEL_EXPORTER_OTLP_ENDPOINT to also exercise span export; without it
+    // this only installs stderr logging.
+    nixie::otel::init(false);
     setup_interface();
     let ifindex = interface_index(IFACE).expect("interface exists");
     let dir = workdir();
@@ -258,4 +261,6 @@ fn serves_boot_script_tftp_dhcp_and_api() {
 
     server.shutdown();
     let _ = serve_handle.join();
+    // Flush exported spans before the test process exits.
+    nixie::otel::shutdown();
 }
