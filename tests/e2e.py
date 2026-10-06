@@ -211,9 +211,9 @@ def check_hosts(hosts_path, machines):
             raise RuntimeError(f"unexpected generated host data for {machine['name']}")
 
 
-def load_span_edges(path):
+def load_spans(path):
     if not path.exists():
-        return set()
+        return []
     text = path.read_text(encoding="utf-8", errors="replace")
     spans = []
     decoder = json.JSONDecoder()
@@ -223,10 +223,18 @@ def load_span_edges(path):
             index += 1
         if index >= len(text):
             break
-        export, index = decoder.raw_decode(text, index)
+        try:
+            export, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            # The collector may be mid-write; retry on the next poll.
+            break
         for resource_span in export.get("resourceSpans", []):
             for scope_span in resource_span.get("scopeSpans", []):
                 spans.extend(scope_span.get("spans", []))
+    return spans
+
+
+def span_edges(spans):
     names = {span.get("spanId"): span.get("name") for span in spans}
     return {
         (names[span["parentSpanId"]], span.get("name"))
@@ -239,18 +247,26 @@ def check_trace(workdir, timeout):
     path = workdir / TRACE_FILE
     deadline = time.time() + timeout
     missing = list(OTEL_SPAN_EDGES)
+    names = set()
     while time.time() < deadline:
-        edges = load_span_edges(path)
-        missing = [edge for edge in OTEL_SPAN_EDGES if edge not in edges]
+        spans = load_spans(path)
+        names = {span.get("name") for span in spans}
+        missing = [edge for edge in OTEL_SPAN_EDGES if edge not in span_edges(spans)]
         if not missing:
-            log(f"verified exported trace with {len(edges)} parent/child span edges")
+            log(f"verified exported trace with {len(spans)} spans")
             try:
                 path.chmod(0o644)
             except OSError:
                 pass
             return
         time.sleep(1)
-    raise RuntimeError(f"exported trace is missing expected spans: {missing}")
+    message = (
+        f"exported trace is missing expected spans: {missing}; "
+        f"observed spans: {sorted(name for name in names if name)}"
+    )
+    # Surface the diagnosis as a GitHub annotation; the step log needs auth.
+    print(f"::error::{message}", flush=True)
+    raise RuntimeError(message)
 
 
 def start_vm(machine, tap, workdir, initialize_disk):
