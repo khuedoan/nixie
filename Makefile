@@ -17,11 +17,11 @@ dev:
 		--debug
 
 test:
-	go test -v ./...
+	cargo test --workspace
 
 test-e2e:
 	sudo env PATH="$$PATH" nix run --print-build-logs .#e2e
 
 fmt:
-	go fmt ./...
+	cargo fmt --all
 	treefmt
