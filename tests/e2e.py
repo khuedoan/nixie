@@ -29,6 +29,19 @@ FAILURES = (
     "failed to read final machine ID",
     "failed to save hosts config",
 )
+# Parent/child span edges the exported trace must contain. This verifies both
+# that OTLP export happened and that the worker spans nest under `nixie.run`
+# like the Go context tree did.
+OTEL_SPAN_EDGES = (
+    ("nixie.run", "pxe.serve"),
+    ("pxe.serve", "pxe.boot_spec"),
+    ("pxe.serve", "pxe.read_boot_file"),
+    ("nixie.run", "api.install_request"),
+    ("api.install_request", "api.install_host"),
+    ("api.install_host", "nixos.install"),
+    ("api.install_host", "nixos.read_machine_id_hash"),
+)
+TRACE_FILE = "trace.json"
 SSH_SEED = bytes.fromhex("62d7724c580bc35680ef58daa05ddbdf8ce37f3de511d246973f64c227c8d8e7")
 SSH_OPTS = (
     "-o", "BatchMode=yes", "-o", "ConnectTimeout=2",
@@ -198,6 +211,64 @@ def check_hosts(hosts_path, machines):
             raise RuntimeError(f"unexpected generated host data for {machine['name']}")
 
 
+def load_spans(path):
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    spans = []
+    decoder = json.JSONDecoder()
+    index = 0
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text):
+            break
+        try:
+            export, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            # The collector may be mid-write; retry on the next poll.
+            break
+        for resource_span in export.get("resourceSpans", []):
+            for scope_span in resource_span.get("scopeSpans", []):
+                spans.extend(scope_span.get("spans", []))
+    return spans
+
+
+def span_edges(spans):
+    names = {span.get("spanId"): span.get("name") for span in spans}
+    return {
+        (names[span["parentSpanId"]], span.get("name"))
+        for span in spans
+        if span.get("parentSpanId") in names
+    }
+
+
+def check_trace(workdir, timeout):
+    path = workdir / TRACE_FILE
+    deadline = time.time() + timeout
+    missing = list(OTEL_SPAN_EDGES)
+    names = set()
+    while time.time() < deadline:
+        spans = load_spans(path)
+        names = {span.get("name") for span in spans}
+        missing = [edge for edge in OTEL_SPAN_EDGES if edge not in span_edges(spans)]
+        if not missing:
+            log(f"verified exported trace with {len(spans)} spans")
+            try:
+                path.chmod(0o644)
+            except OSError:
+                pass
+            return
+        time.sleep(1)
+    message = (
+        f"exported trace is missing expected spans: {missing}; "
+        f"observed spans: {sorted(name for name in names if name)}"
+    )
+    # Surface the diagnosis as a GitHub annotation; the step log needs auth.
+    print(f"::error::{message}", flush=True)
+    raise RuntimeError(message)
+
+
 def start_vm(machine, tap, workdir, initialize_disk):
     name = machine["name"]
     disk = workdir / f"{name}.qcow2"
@@ -302,6 +373,7 @@ def main():
         wait_nixie(nixie)
         check_hosts(hosts_path, machines)
         verify_ssh(machines, key_path, TIMEOUT["ssh"], "verified")
+        check_trace(workdir, 60)
 
         log("power cycling machines to verify disk boot without the installer")
         for qemu in reversed(qemus):

@@ -13,7 +13,8 @@ Nixie is a simpler, stateless alternative to [Foreman](https://theforeman.org),
 [MAAS](https://canonical.com/maas), [OpenStack
 Ironic](https://docs.openstack.org/ironic),
 [Tinkerbell](https://tinkerbell.org), etc., focusing on NixOS deployments on
-bare metal (though it can also be used in virtualized environments).
+bare metal (though it can also be used in virtualized environments). It is
+implemented in Rust.
 
 ## Features
 
@@ -124,7 +125,7 @@ sequenceDiagram
     end
 
     Nixie->>Nix: Build installer components<br/>(kernel, initrd, squashfs)
-    Nixie->>Nixie: Start server components in goroutines<br/>(DHCP/TFTP/HTTP/API)
+    Nixie->>Nixie: Start server components in the background<br/>(DHCP/TFTP/HTTP/API)
 
     loop For each machine
         Nixie->>Machines: Broadcast Wake-on-LAN magic packet

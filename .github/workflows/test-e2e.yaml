@@ -32,6 +32,12 @@ jobs:
         with:
           use-flakehub: disabled
 
+      - name: Run Rust tests
+        # `buildRustPackage` runs `cargo test` in its check phase, so this step
+        # is the Rust test gate. The e2e step below builds the same package and
+        # reuses it.
+        run: nix build .#default --print-build-logs
+
       - name: Run end-to-end test
         id: e2e
         run: make test-e2e
@@ -39,3 +45,11 @@ jobs:
       - name: Write trace summary
         if: always()
         run: python3 tests/summary.py "${{ steps.e2e.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nixie-e2e-trace
+          path: trace.json
+          if-no-files-found: warn
