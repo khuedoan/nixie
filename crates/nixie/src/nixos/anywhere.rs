@@ -16,7 +16,13 @@ pub fn install(
     debug: bool,
 ) -> Result<()> {
     let target = ssh_target(user, host);
-    let _span = info_span!("nixos.install", host, flake_ref, target).entered();
+    let _span = info_span!(
+        "nixos.install",
+        "net.peer.ip" = host,
+        "nix.flake_ref" = flake_ref,
+        "ssh.target" = target
+    )
+    .entered();
 
     if ssh_key.is_empty() && ssh_agent_socket.is_empty() {
         bail!("install SSH key or SSH agent socket is required");

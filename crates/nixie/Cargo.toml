@@ -26,6 +26,15 @@ hmac = "0.12"
 hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.34"
+opentelemetry = "0.33"
+opentelemetry_sdk = { version = "0.33", features = ["internal-logs"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = [
+    "grpc-tonic",
+    "trace",
+    "internal-logs",
+] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

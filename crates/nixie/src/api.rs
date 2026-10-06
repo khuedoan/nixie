@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tiny_http::{Header, Method, Response};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn};
 
 use crate::hosts::{self, Host, HostsConfig, State};
 use crate::nixos;
@@ -79,6 +79,12 @@ impl Api {
         };
 
         let ip = client_ip(&request);
+        let _span = info_span!(
+            "api.install_request",
+            "net.peer.ip" = %ip,
+            "host.mac" = %install_request.mac_address,
+        )
+        .entered();
         info!(%ip, mac = %install_request.mac_address, "received install request from agent");
 
         let flake_output = match hosts::get_flake_output_by_mac(
@@ -133,6 +139,16 @@ impl Api {
         flake: &str,
         ip: &str,
     ) -> Result<()> {
+        let span = info_span!(
+            "api.install_host",
+            "host.mac" = %host.mac_address(),
+            "net.peer.ip" = ip,
+            "nix.flake_output" = flake_output,
+            "nix.flake_ref" = flake,
+            "host.machine_id_hash" = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         info!(%ip, flake_output, "installing NixOS");
         nixos::install(
             flake,
@@ -153,6 +169,7 @@ impl Api {
         )
         .context("failed to read final machine ID")?;
 
+        span.record("host.machine_id_hash", machine_id_hash.as_str());
         host.set_final_identity(ip.to_string(), machine_id_hash);
         self.save_hosts().context("failed to save hosts config")?;
         host.set_state(State::Installed);

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use dhcproto::v4::{DhcpOption, Flags, Message, MessageType, Opcode};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn};
 
 use crate::hosts::{HostsConfig, State};
 use crate::mac::MacAddr;
@@ -40,12 +40,26 @@ pub struct NixieBooter {
 
 impl Booter for NixieBooter {
     fn boot_spec(&self, machine: Machine) -> Result<Option<BootSpec>> {
+        let span = info_span!(
+            "pxe.boot_spec",
+            "host.mac" = %machine.mac,
+            "pxe.arch" = machine.arch.name(),
+            "nix.flake_output" = tracing::field::Empty,
+            "pxe.accepted" = tracing::field::Empty,
+            "pxe.reject_reason" = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         for (flake_output, host) in &self.hosts_config {
             if host.mac_address() == machine.mac {
+                span.record("nix.flake_output", flake_output);
                 debug!(flake_output, "matched boot request to flake output");
                 if host.state() != State::Unknown {
+                    span.record("pxe.accepted", false);
+                    span.record("pxe.reject_reason", "already_used");
                     bail!("PXE boot already used for MAC address: {}", machine.mac);
                 }
+                span.record("pxe.accepted", true);
                 return Ok(Some(BootSpec {
                     kernel: "kernel".to_string(),
                     initrd: vec!["initrd".to_string()],
@@ -57,17 +71,29 @@ impl Booter for NixieBooter {
                 }));
             }
         }
+        span.record("pxe.accepted", false);
+        span.record("pxe.reject_reason", "unknown_mac");
         bail!("unknown MAC address: {}", machine.mac)
     }
 
     fn read_boot_file(&self, id: &str) -> Result<(File, u64)> {
+        let span = info_span!(
+            "pxe.read_boot_file",
+            "pxe.file_id" = id,
+            "file.path" = tracing::field::Empty,
+            "file.size" = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         let path = match id {
             "kernel" => &self.kernel,
             "initrd" => &self.initrd,
             other => bail!("unknown file ID: {other}"),
         };
+        span.record("file.path", path.as_str());
         let file = File::open(path).with_context(|| format!("opening boot file {path}"))?;
         let size = file.metadata()?.len();
+        span.record("file.size", size);
         Ok((file, size))
     }
 }
@@ -106,6 +132,13 @@ impl PxeServer {
     /// Start serving and block until [`PxeServer::shutdown`] is called or a
     /// component fails.
     pub fn serve(&self) -> Result<()> {
+        let _span = info_span!(
+            "pxe.serve",
+            "server.address" = %self.address,
+            "pxe.dhcp_no_bind" = true,
+        )
+        .entered();
+
         let http_listener = TcpListener::bind(SocketAddr::new(self.address, PORT_HTTP))
             .context("binding HTTP socket")?;
 

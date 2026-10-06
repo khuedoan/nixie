@@ -15,7 +15,7 @@ use nixie::network;
 use nixie::nixos;
 use nixie::otel;
 use nixie::pxe::{NixieBooter, PxeServer, IPXE_EFI64};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn};
 
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -39,7 +39,9 @@ fn main() -> ExitCode {
         }
     };
     otel::init(flags.debug);
-    match run(&flags) {
+    let result = run(&flags);
+    otel::shutdown();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             error!("{error:#}");
@@ -49,6 +51,14 @@ fn main() -> ExitCode {
 }
 
 fn run(flags: &Flags) -> anyhow::Result<()> {
+    let _span = info_span!(
+        "nixie.run",
+        "nixie.installer" = %flags.installer,
+        "nixie.flake" = %flags.flake,
+        "nixie.hosts_file" = %flags.hosts,
+    )
+    .entered();
+
     let hosts_config = hosts::load_hosts_config(&flags.hosts)?;
     debug!(?flags, "parsed command line flags");
 

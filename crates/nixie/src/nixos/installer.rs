@@ -14,7 +14,7 @@ pub struct InstallerComponents {
 }
 
 fn nix_build(flake_output: &str, debug: bool) -> Result<String> {
-    let _span = info_span!("nix.build", flake_output).entered();
+    let _span = info_span!("nix.build", "nix.flake_output" = flake_output).entered();
 
     let output = Command::new("nix")
         .args(["build", "--no-link", "--print-out-paths", flake_output])
@@ -34,7 +34,7 @@ fn nix_build(flake_output: &str, debug: bool) -> Result<String> {
 }
 
 pub fn build_installer(flake_ref: &str, debug: bool) -> Result<InstallerComponents> {
-    let _span = info_span!("nixie.build_installer", installer = flake_ref).entered();
+    let _span = info_span!("nixie.build_installer", "nixie.installer" = flake_ref).entered();
 
     let kernel_out = nix_build(&format!("{flake_ref}.config.system.build.kernel"), debug)
         .context("failed to build kernel")?;

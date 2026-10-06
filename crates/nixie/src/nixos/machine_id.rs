@@ -39,8 +39,8 @@ pub fn read_machine_id_hash_timeout(
 ) -> Result<String> {
     let _span = info_span!(
         "nixos.read_machine_id_hash",
-        host,
-        target = ssh_target(user, host)
+        "net.peer.ip" = host,
+        "ssh.target" = ssh_target(user, host)
     )
     .entered();
 
