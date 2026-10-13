@@ -75,6 +75,12 @@ func (h *Host) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (h *Host) GetIP() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.IP
+}
+
 func (h *Host) GetState() State {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -90,7 +96,9 @@ func (h *Host) SetState(state State) {
 func (h *Host) SetFinalIdentity(ip string, machineIDHash string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.IP = ip
+	if h.IP == "" {
+		h.IP = ip
+	}
 	h.MachineIDHash = machineIDHash
 }
 

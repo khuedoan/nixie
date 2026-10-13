@@ -87,7 +87,13 @@ in [`./examples/configuration.nix`](./examples/configuration.nix).
 You can override the agent socket with `--ssh-agent-socket`.
 Alternatively, specify the keys directly with `--install-ssh-key` and `--deployment-ssh-key`.
 
-After a successful installation, Nixie updates final IP and machine ID hash:
+Nixie installs through the PXE callback address. If `ip` is configured in the
+host inventory, Nixie preserves it and uses it for post-install SSH. Configure
+that address in the installed NixOS system as well; Nixie does not configure
+networking.
+
+After a successful installation, Nixie records the machine ID hash and fills
+in `ip` only when it was omitted or empty:
 
 ```diff
  {

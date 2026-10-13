@@ -59,3 +59,22 @@ func TestHashMachineID(t *testing.T) {
 		t.Fatal("HashMachineID accepted invalid machine ID")
 	}
 }
+
+func TestSetFinalIdentityPreservesConfiguredIP(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		configuredIP string
+		wantIP       string
+	}{
+		{name: "configured", configuredIP: "192.0.2.10", wantIP: "192.0.2.10"},
+		{name: "discovered", wantIP: "192.0.2.20"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			host := &Host{IP: test.configuredIP}
+			host.SetFinalIdentity("192.0.2.20", "new-machine-id-hash")
+			if host.IP != test.wantIP || host.MachineIDHash != "new-machine-id-hash" {
+				t.Fatalf("final identity = (%q, %q), want (%q, %q)", host.IP, host.MachineIDHash, test.wantIP, "new-machine-id-hash")
+			}
+		})
+	}
+}
