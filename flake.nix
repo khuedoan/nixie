@@ -60,7 +60,10 @@
       app = mkGoPackage {
         pname = "nixie";
         src = appSource;
-        subPackages = [ "./cmd/nixie" ];
+        subPackages = [
+          "./cmd/nixie"
+          "./internal/..."
+        ];
       };
 
       agent = mkGoPackage {
