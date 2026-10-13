@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"net"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,12 +17,13 @@ import (
 
 func TestInstallUsesConfiguredFinalAddress(t *testing.T) {
 	for _, test := range []struct {
-		name         string
-		configuredIP string
-		wantIP       string
+		name     string
+		hostJSON string
+		wantIP   string
 	}{
-		{name: "configured", configuredIP: "192.0.2.10", wantIP: "192.0.2.10"},
-		{name: "discovered", wantIP: "192.0.2.20"},
+		{name: "configured", hostJSON: `{"mac_address":"02:00:00:00:00:01","ip":"192.0.2.10"}`, wantIP: "192.0.2.10"},
+		{name: "empty", hostJSON: `{"mac_address":"02:00:00:00:00:01","ip":""}`, wantIP: "192.0.2.20"},
+		{name: "omitted", hostJSON: `{"mac_address":"02:00:00:00:00:01"}`, wantIP: "192.0.2.20"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
@@ -37,11 +38,10 @@ func TestInstallUsesConfiguredFinalAddress(t *testing.T) {
 			}
 			t.Setenv("NIXIE_TEST_DIR", directory)
 			t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
-			mac, err := net.ParseMAC("02:00:00:00:00:01")
-			if err != nil {
+			host := new(hosts.Host)
+			if err := json.Unmarshal([]byte(test.hostJSON), host); err != nil {
 				t.Fatal(err)
 			}
-			host := &hosts.Host{MACAddress: mac, IP: test.configuredIP}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			api := &API{
