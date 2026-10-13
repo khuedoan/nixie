@@ -121,16 +121,20 @@ func (api *API) installHost(ctx context.Context, host *hosts.Host, flakeOutput, 
 		return fmt.Errorf("failed to install NixOS: %w", err)
 	}
 
-	machineIDHash, err := nixos.ReadMachineIDHash(ctx, api.deploymentSSHUser, ip, api.deploymentSSHKey, api.sshAgentSocket, api.debug)
+	finalIP := host.GetIP()
+	if finalIP == "" {
+		finalIP = ip
+	}
+	machineIDHash, err := nixos.ReadMachineIDHash(ctx, api.deploymentSSHUser, finalIP, api.deploymentSSHKey, api.sshAgentSocket, api.debug)
 	if err != nil {
 		return fmt.Errorf("failed to read final machine ID: %w", err)
 	}
 	span.SetAttributes(attribute.String("host.machine_id_hash", machineIDHash))
-	host.SetFinalIdentity(ip, machineIDHash)
+	host.SetFinalIdentity(finalIP, machineIDHash)
 	if err := api.saveHosts(); err != nil {
 		return fmt.Errorf("failed to save hosts config %s: %w", api.hostsFile, err)
 	}
-	log.Info("successfully installed NixOS", "ip", ip, "flake", flake)
+	log.Info("successfully installed NixOS", "ip", finalIP, "flake", flake)
 	host.SetState(hosts.StateInstalled)
 	return nil
 }
