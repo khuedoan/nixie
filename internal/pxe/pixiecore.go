@@ -3,20 +3,26 @@ package pxe
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
 
 	"code.khuedoan.com/nixie/internal/hosts"
+	"code.khuedoan.com/nixie/internal/netboot/pixiecore"
 
 	"github.com/charmbracelet/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"go.universe.tf/netboot/out/ipxe"
-	"go.universe.tf/netboot/pixiecore"
 )
+
+// TODO rebuild this with a newer iPXE version with Nix
+// Current binary copied from danderson/netboot
+//
+//go:embed firmware/ipxe-x86_64.efi
+var ipxeEFI64 []byte
 
 type Server struct {
 	ctx    context.Context
@@ -135,12 +141,6 @@ func (s *Server) Shutdown() {
 }
 
 func NewPXEServer(ctx context.Context, address, kernel, initrd, init string, hostsConfig hosts.HostsConfig) (*Server, error) {
-	// TODO maybe build this with a new iPXE version with Nix
-	efi64Data, err := ipxe.Asset("third_party/ipxe/src/bin-x86_64-efi/ipxe.efi")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load embedded iPXE firmware: %w", err)
-	}
-
 	// Be defensive and check if the files exist
 	for _, p := range []string{kernel, initrd, init} {
 		if _, err := os.Stat(p); err != nil {
@@ -148,11 +148,11 @@ func NewPXEServer(ctx context.Context, address, kernel, initrd, init string, hos
 		}
 	}
 
-	ipxe := map[pixiecore.Firmware][]byte{
+	firmware := map[pixiecore.Firmware][]byte{
 		// https://www.rfc-editor.org/errata_search.php?rfc=4578
 		// Only FirmwareEFI64 is supported for now, FirmwareBC may be added later if needed
 		// https://github.com/danderson/netboot/pull/30
-		pixiecore.FirmwareEFI64: efi64Data,
+		pixiecore.FirmwareEFI64: ipxeEFI64,
 	}
 
 	if ctx == nil {
@@ -172,7 +172,7 @@ func NewPXEServer(ctx context.Context, address, kernel, initrd, init string, hos
 		Address:    address,
 		Booter:     booter,
 		DHCPNoBind: true,
-		Ipxe:       ipxe,
+		Ipxe:       firmware,
 		Log: func(subsystem, msg string) {
 			log.Info(msg, "subsystem", subsystem)
 		},
