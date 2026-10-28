@@ -48,27 +48,33 @@
         ./cmd/nixie-agent
       ];
 
-      mkGoPackage =
-        { pname, src, subPackages }:
-        pkgs.buildGoApplication {
-          inherit pname subPackages;
-          version = "0.1";
-          inherit src;
-          modules = ./gomod2nix.toml;
-        };
-
-      app = mkGoPackage {
+      app = pkgs.buildGoApplication {
         pname = "nixie";
+        version = "0.1";
         src = appSource;
+        modules = ./gomod2nix.toml;
         subPackages = [
           "./cmd/nixie"
           "./internal/..."
         ];
+        nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+        postFixup = ''
+          wrapProgram "$out/bin/nixie" \
+            --prefix PATH : ${
+              pkgs.lib.makeBinPath [
+                pkgs.nix
+                pkgs.nixos-anywhere
+                pkgs.openssh
+              ]
+            }
+        '';
       };
 
-      agent = mkGoPackage {
+      agent = pkgs.buildGoApplication {
         pname = "nixie-agent";
+        version = "0.1";
         src = agentSource;
+        modules = ./gomod2nix.toml;
         subPackages = [ "./cmd/nixie-agent" ];
       };
 
