@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"code.khuedoan.com/nixie/internal/hosts"
 	"code.khuedoan.com/nixie/internal/protocol"
@@ -95,6 +96,12 @@ func TestAdmissionVerificationAndCompletion(t *testing.T) {
 	}
 
 	postStatus(t, api, protocol.InstallResult{MACAddress: nodeMAC}, http.StatusBadRequest)
+	postStatus(t, api, protocol.InstallResult{
+		MACAddress: nodeMAC,
+		Status:     protocol.StatusProgress,
+		Phase:      protocol.PhasePartition,
+		Duration:   time.Millisecond,
+	}, http.StatusAccepted)
 
 	for range 2 {
 		postStatus(t, api, protocol.InstallResult{MACAddress: nodeMAC, Status: protocol.StatusCompleted}, http.StatusAccepted)

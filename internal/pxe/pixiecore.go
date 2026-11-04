@@ -9,8 +9,12 @@ import (
 	"os"
 
 	"code.khuedoan.com/nixie/internal/hosts"
+	"code.khuedoan.com/nixie/internal/telemetry"
 
 	"github.com/charmbracelet/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.universe.tf/netboot/out/ipxe"
 	"go.universe.tf/netboot/pixiecore"
 )
@@ -20,6 +24,7 @@ type Server struct {
 }
 
 type PXEBooter struct {
+	ctx         context.Context
 	Address     string
 	Kernel      string
 	Initrd      string
@@ -28,9 +33,19 @@ type PXEBooter struct {
 	HostsConfig hosts.HostsConfig
 }
 
-func (b *PXEBooter) BootSpec(m pixiecore.Machine) (*pixiecore.Spec, error) {
+func (b *PXEBooter) BootSpec(m pixiecore.Machine) (spec *pixiecore.Spec, err error) {
+	_, span := otel.Tracer("nixie").Start(b.ctx, "pxe.boot_request",
+		trace.WithAttributes(
+			attribute.String("host.mac", m.MAC.String()),
+			attribute.String("pxe.arch", m.Arch.String()),
+		),
+	)
+	defer func() { telemetry.End(span, err) }()
+
 	for flakeOutput, hostConfig := range b.HostsConfig {
 		if hostConfig.MACAddress == m.MAC.String() {
+			span.SetAttributes(attribute.String("host.name", flakeOutput))
+
 			if hostConfig.GetState() != hosts.StateUnknown {
 				return nil, fmt.Errorf("PXE boot already used for MAC address: %s", m.MAC)
 			}
@@ -113,6 +128,7 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func NewPXEServer(
+	ctx context.Context,
 	address, kernel, initrd, init, flake string,
 	hostsConfig hosts.HostsConfig,
 ) (*Server, error) {
@@ -134,6 +150,7 @@ func NewPXEServer(
 	}
 
 	booter := &PXEBooter{
+		ctx:         ctx,
 		Address:     address,
 		Kernel:      kernel,
 		Initrd:      initrd,
