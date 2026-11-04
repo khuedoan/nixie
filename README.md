@@ -22,11 +22,11 @@ Currently, only `x86_64-linux` is supported.
 - [x] Simple, declarative JSON host inventory
 - [x] Build a custom NixOS installer from a flake
 - [x] Built-in PXE server based on [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) to serve netboot components from the custom installer
-- [x] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
+- [x] Install NixOS from a flake using Nix, disko, and nixos-install
 - [x] Remote power-on with [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN)
-- [x] Host IP discovery via callback
+- [x] Read-only host inventory with fixed IP addresses
 - [x] Ephemeral PXE server [^1]
-- [x] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
+- [x] Concurrent installation across hosts
 - [ ] Support IPv6 single-stack
 
 [^1]: No pre-configured PXE server is required to install other machines - you
@@ -34,10 +34,6 @@ Currently, only `x86_64-linux` is supported.
     "first machine in the data center" problem: in bare-metal setups with
     persistent PXE servers, you would otherwise need to automate the installation
     of the PXE server itself.
-[^2]: Using the provided examples with a warm cache on a 1 Gbps network.
-    Factors that affect the speed include whether the configuration has been
-    cached in the Nix store, the size of the NixOS configuration, the network
-    speed, etc.
 
 ## Usage
 
@@ -51,12 +47,11 @@ multiple bare-metal machines based on the MAC addresses defined in
 sudo nixie \
     --installer ./examples#nixosConfigurations.installer \
     --flake ./examples \
-    --hosts ./examples/hosts.json \
-    --install-ssh-key ~/.ssh/nixie-install \
-    --deployment-ssh-user root \
-    --deployment-ssh-key ~/.ssh/nixie-deployment \
-    --ssh-agent-socket "$SSH_AUTH_SOCK"
+    --hosts ./examples/hosts.json
 ```
+
+Nixie detects a local IPv4 address automatically. Use `--address` to select the
+controller’s IP on the provisioning network when needed.
 
 If the machine that runs Nixie has a firewall, open these ports:
 
@@ -79,22 +74,62 @@ TODO add a demo video/asciinema.
 
 See the full example in [`./examples`](./examples).
 
-Nixie uses the IP and MAC addresses in `hosts.json` to identify machines and
-check their health over SSH after installation. The configured IP is the
-desired address of the installed system, you'll need to set it in your
-NixOS configuration or reserve it on your router.
+The installer receives its source URL and host configuration through PXE boot
+parameters. No SSH access or installer SSH key is required.
 
-By default, Nixie authenticates through `ssh-agent`. Ensure the agent contains
-the keys authorized by both
-[`./examples/installer.nix`](./examples/installer.nix) and the installed system
-in [`./examples/configuration.nix`](./examples/configuration.nix).
+Every inventory entry requires a unique MAC address and a unique fixed IP
+address. Configure that IP in NixOS or reserve it in DHCP. Nixie does not
+discover addresses or modify the inventory.
 
-You can override the agent socket with `--ssh-agent-socket`.
-Alternatively, specify the keys directly with `--install-ssh-key` and `--deployment-ssh-key`.
+Before provisioning, Nixie probes SSH at each configured IP. Reachable hosts are
+left alone. Unreachable hosts are eligible for installation, including previously
+installed hosts that are offline. Running Nixie authorizes provisioning those
+listed hosts; the configured IP must belong to the intended machine.
+
+After installation, Nixie waits for SSH at the configured IP and logs its
+Ed25519 host-key fingerprint. It does not log in or save the fingerprint.
+This verifies SSH reachability, not application health. No authorized user key,
+private key, or SSH agent is required. The installed system must expose an
+Ed25519 SSH host key on port 22.
+
+Nixie supports only its custom x86_64 NixOS installer with
+`nixosModules.nixie-agent`. The module supplies the agent and its tools, runs it
+as root, disables installer SSH, and prevents automatic installation restarts.
+It also exposes `system.build.nixieInstaller`, a single bundle containing the
+kernel, initrd, and init path that the controller builds for PXE.
+
+The controller snapshots the flake source once and serves that archive to every
+host. Nix filters Git sources to tracked files, including tracked working-tree
+changes. Local path inputs must remain inside that source tree. Keep secrets
+outside the source tree and the Nix store.
+
+The agent builds and runs disko, then runs `nixos-install --flake` to build the
+system directly in the mounted target store and install it. Hosts need network
+access to fetch remote flake inputs and dependencies from their configured Nix
+caches. Hosts install concurrently. Nixie provides no build cache or extra-file
+transfer.
+
+Source delivery uses unauthenticated HTTP on the provisioning address, like PXE
+image delivery. Use a trusted provisioning LAN. The source controls code that
+runs as root, so public contents alone do not provide authenticity. Normal Nix
+signature checks remain enabled for downloaded dependencies.
+
+The agent uses one `/status` callback for admission, completed phases, errors,
+and completion. It waits for admission before destructive operations and for
+completion acknowledgment before reboot. Progress reports are best effort.
+Each host produces one final result. Other hosts continue installing after a
+failure, and Nixie exits with an error after collecting all results. Interrupting
+a run also exits with an error.
+
+The per-host trace includes PXE boot requests and an `agent.boot` stage measured
+from kernel startup through agent admission, at second resolution. This covers
+initrd, system startup, and networking; firmware time is excluded. Pixiecore has
+no native OpenTelemetry hooks, so Nixie traces its boot-configuration callback.
+
+The controller exports traces using agent-measured durations and timestamps
+estimated from report arrival. The agent does not connect to the collector.
 
 ## How it works
-
-TODO refine the diagram after implementation.
 
 ```mermaid
 sequenceDiagram
@@ -105,8 +140,8 @@ sequenceDiagram
     Nixie->>Nixie: Load hosts.json
 
     loop For each machine
-    Nixie->>Machines: Probe SSH at configured IP
-    Nixie->>Nixie: Skip if SSH responds
+    Nixie->>Machines: Try checking status
+    Nixie->>Nixie: Skip if SSH is reachable
     end
 
     Nixie->>Nix: Build installer components<br/>(kernel, initrd, squashfs)
@@ -128,19 +163,24 @@ sequenceDiagram
 
         Note over Machines: Boot into NixOS installer
         Note over Machines: SystemD starts nixie-agent service
-        Machines->>Nixie: nixie-agent phone home to request install with MAC address
-        Nixie->>Nixie: Find flake based on MAC address and get client IP from API request
-        Nixie->>Nix: Build NixOS configuration
-        Nixie->>Machines: nixos-anywhere format disks via SSH based on disko configuration
-        Nixie->>Machines: nixos-anywhere install system closure via SSH
-        Nixie->>Machines: nixos-anywhere trigger reboot
+        Note over Machines: Boot parameters select source URL and configuration
+        Machines->>Nixie: Report started and wait for admission
+        Machines->>Nixie: Fetch shared source archive
+        Machines->>Machines: Build and run disko to partition and mount disks
+        Machines->>Machines: nixos-install --flake builds into target store and installs
+        Machines->>Nixie: Report installation result
+        Nixie-->>Machines: Acknowledge result
+        Machines->>Machines: Schedule reboot through systemd
 
         Note over Machines: Reboot after installation completed
 
-        Nixie->>Machines: nixos-anywhere confirms machine rebooted
-        Nixie->>Machines: Read final /etc/machine-id over SSH
+        Nixie->>Machines: Read Ed25519 host key through an SSH handshake
+        Nixie->>Nixie: Log observed SSH fingerprint
         deactivate Machines
 
+        activate Machines
+
+        Nixie->>Machines: Check host status
     end
 
     Note over Nixie: Return when all machines are installed
