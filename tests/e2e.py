@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import base64
+import hashlib
 import json
 import os
 import shlex
@@ -26,7 +28,7 @@ TIMEOUT = {"api": 30 * 60, "install": 45 * 60, "ssh": 30 * 60, "cold": 15 * 60}
 REQUIRED_ENV = ("NIXIE_BIN", "OVMF_CODE", "OVMF_VARS")
 FAILURES = (
     "failed to install NixOS",
-    "failed to read final machine ID",
+    "failed to read final SSH host key",
 )
 SSH_SEED = bytes.fromhex("62d7724c580bc35680ef58daa05ddbdf8ce37f3de511d246973f64c227c8d8e7")
 SSH_OPTS = (
@@ -88,6 +90,17 @@ def stop(process):
         process.log_handle.close()
 
 
+def shutdown_vm(process, workdir):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as monitor:
+        monitor.settimeout(5)
+        monitor.connect(str(workdir / f"{process.name}.monitor"))
+        monitor.sendall(b"system_powerdown\n")
+    process.wait(timeout=60)
+    if process.returncode != 0:
+        raise RuntimeError(f"{process.name} exited with status {process.returncode}")
+    stop(process)
+
+
 def cleanup():
     for process in reversed(PROCESSES):
         stop(process)
@@ -140,12 +153,20 @@ def wait_nixie(process):
     raise TimeoutError("timed out waiting for nixie to finish installing all hosts")
 
 
-def wait_ssh(key_path, machine, timeout):
-    cmd = ["ssh", "-i", str(key_path), *SSH_OPTS, f"root@{machine['ip']}", "hostname"]
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def wait_ssh_fingerprint(machine, timeout):
+    cmd = ["ssh-keyscan", "-T", "2", "-t", "ed25519", machine["ip"]]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip() == machine["name"]:
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if len(fields) != 3 or fields[1] != "ssh-ed25519":
+                continue
+            digest = hashlib.sha256(base64.b64decode(fields[2], validate=True)).digest()
+            fingerprint = "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+            if "fingerprint" in machine and fingerprint != machine["fingerprint"]:
+                raise RuntimeError(f"SSH fingerprint mismatch on {machine['name']}")
+            machine["fingerprint"] = fingerprint
             return
         time.sleep(2)
     raise TimeoutError(f"timed out waiting for SSH on {machine['ip']}")
@@ -206,7 +227,7 @@ def start_vm(machine, tap, workdir, initialize_disk):
         "qemu-system-x86_64", "-name", name, "-machine", "q35",
         "-m", "2048", "-smp", "2", "-display", "none",
         "-serial", f"file:{workdir / f'{name}.serial.log'}",
-        "-monitor", "none",
+        "-monitor", f"unix:{workdir / f'{name}.monitor'},server=on,wait=off",
         "-drive", f"if=pflash,format=raw,readonly=on,file={os.environ['OVMF_CODE']}",
         "-drive", f"if=pflash,format=raw,file={vars_path}",
         "-drive", f"if=none,id=disk0,file={disk},format=qcow2",
@@ -250,10 +271,10 @@ def start_services(ssh_agent_socket, flake_ref, hosts_path, workdir):
     return start("nixie", cmd, workdir / "nixie.log", env=env)
 
 
-def verify_ssh(machines, key_path, timeout, message):
+def verify_ssh(machines, timeout, message):
     for machine in machines:
-        wait_ssh(key_path, machine, timeout)
-        log(f"{message} {machine['name']} at {machine['ip']}")
+        wait_ssh_fingerprint(machine, timeout)
+        log(f"{message} {machine['name']} at {machine['ip']} {machine['fingerprint']}")
 
 
 def check_prerequisites():
@@ -298,13 +319,13 @@ def main():
         qemus = [start_vm(machine, tap, workdir, True) for machine, tap in zip(machines, taps, strict=True)]
         wait_nixie(nixie)
         check_hosts(hosts_path, inventory)
-        verify_ssh(machines, key_path, TIMEOUT["ssh"], "verified")
+        verify_ssh(machines, TIMEOUT["ssh"], "verified")
 
-        log("power cycling machines to verify disk boot without the installer")
+        log("shutting down guests before cold disk boot without the installer")
         for qemu in reversed(qemus):
-            stop(qemu)
+            shutdown_vm(qemu, workdir)
         qemus = [start_vm(machine, tap, workdir, False) for machine, tap in zip(machines, taps, strict=True)]
-        verify_ssh(machines, key_path, TIMEOUT["cold"], "verified cold boot for")
+        verify_ssh(machines, TIMEOUT["cold"], "verified cold boot for")
 
         passed = True
         log("end-to-end test passed")

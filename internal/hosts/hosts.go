@@ -2,15 +2,11 @@ package hosts
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"strings"
 	"sync"
 )
 
@@ -115,21 +111,4 @@ func AllInstalled(hostsConfig HostsConfig) bool {
 	}
 
 	return true
-}
-
-func HashMachineID(machineID string) (string, error) {
-	machineID = strings.ToLower(strings.TrimSpace(machineID))
-	if len(machineID) != 32 {
-		return "", fmt.Errorf("invalid machine ID length: got %d, want 32", len(machineID))
-	}
-	if _, err := hex.DecodeString(machineID); err != nil {
-		return "", fmt.Errorf("invalid machine ID %q: %w", machineID, err)
-	}
-
-	// systemd treats /etc/machine-id as confidential. Store an app-specific hash
-	// instead of the raw ID so hosts can be identified without exposing it.
-	// https://www.freedesktop.org/software/systemd/man/latest/machine-id.html
-	mac := hmac.New(sha256.New, []byte("code.khuedoan.com/nixie/machine-id/v1"))
-	mac.Write([]byte(machineID))
-	return hex.EncodeToString(mac.Sum(nil)), nil
 }

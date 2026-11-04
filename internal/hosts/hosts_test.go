@@ -62,17 +62,3 @@ func TestInventoryRejectsDuplicateIdentities(t *testing.T) {
 		})
 	}
 }
-
-func TestHashMachineID(t *testing.T) {
-	machineID := "0123456789abcdef0123456789abcdef"
-	machineIDHash, err := HashMachineID(machineID + "\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(machineIDHash) != 64 || machineIDHash != strings.ToLower(machineIDHash) || machineIDHash == machineID {
-		t.Fatalf("invalid hash for machine ID: %q", machineIDHash)
-	}
-	if _, err := HashMachineID("not-a-machine-id"); err == nil {
-		t.Fatal("HashMachineID accepted invalid machine ID")
-	}
-}

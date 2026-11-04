@@ -74,7 +74,7 @@ func main() {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	checkInstalledHosts(ctx, hostsConfig, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug)
+	checkReachableHosts(ctx, hostsConfig)
 	if hosts.AllInstalled(hostsConfig) {
 		log.Info("all hosts are already installed")
 		return
@@ -111,7 +111,7 @@ func main() {
 
 	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.InstallSSHKey, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
+		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.InstallSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
@@ -157,20 +157,30 @@ func main() {
 	log.Info("nixie stopped gracefully")
 }
 
-func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig, deploymentSSHUser, deploymentSSHKey, sshAgentSocket string, debug bool) {
+func checkReachableHosts(ctx context.Context, hostsConfig hosts.HostsConfig) {
 	var wg sync.WaitGroup
+
 	for name, host := range hostsConfig {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+
 			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			if _, err := nixos.ReadMachineIDHash(checkCtx, deploymentSSHUser, host.IP, deploymentSSHKey, sshAgentSocket, debug); err != nil {
+
+			fingerprint, err := nixos.ReadHostFingerprint(checkCtx, host.IP)
+			if err != nil {
 				return
 			}
+
 			host.SetState(hosts.StateInstalled)
-			log.Info("SSH reachable, skipping installation", "host", name, "ip", host.IP)
+			log.Info("SSH reachable, skipping installation",
+				"host", name,
+				"ip", host.IP,
+				"fingerprint", fingerprint,
+			)
 		}()
 	}
+
 	wg.Wait()
 }
