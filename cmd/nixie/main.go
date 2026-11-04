@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -14,18 +18,24 @@ import (
 	"code.khuedoan.com/nixie/internal/network"
 	"code.khuedoan.com/nixie/internal/nixos"
 	"code.khuedoan.com/nixie/internal/pxe"
+	"code.khuedoan.com/nixie/internal/telemetry"
 
 	"github.com/charmbracelet/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal("nixie failed", "error", err)
+	}
+}
+
+func run() (runErr error) {
 	flags, err := parseFlags()
 	if err != nil {
-		log.Fatal("failed to parse command-line flags", "error", err)
+		return fmt.Errorf("failed to parse command-line flags: %w", err)
 	}
 
 	if flags.Debug {
@@ -36,29 +46,33 @@ func main() {
 
 	hostsConfig, err := hosts.LoadHostsConfig(flags.HostsFile)
 	if err != nil {
-		log.Fatal("failed to load hosts config", "error", err)
+		return fmt.Errorf("failed to load hosts config: %w", err)
 	}
+
 	log.Debug("parsed hosts config", "hosts", hostsConfig)
 
-	var address string
-	if flags.Address == "" {
+	address := flags.Address
+	if address == "" {
 		address, err = network.DetectServerAddress()
 		if err != nil {
-			log.Fatal("failed to detect server address, please specify --address manually", "error", err)
+			return fmt.Errorf("detect provisioning address; specify --address explicitly: %w", err)
 		}
-	} else {
-		address = flags.Address
 	}
-	log.Debug("detected server IP", "address", address)
 
-	ctx := context.Background()
-	shutdownTrace, err := setupTracing(ctx, "nixie")
+	log.Debug("provisioning address", "address", address)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdownTrace, err := telemetry.Setup(ctx)
 	if err != nil {
-		log.Fatal("failed to start telemetry", "error", err)
+		return fmt.Errorf("failed to start telemetry: %w", err)
 	}
+
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
 		if err := shutdownTrace(ctx); err != nil {
 			log.Warn("failed to shutdown telemetry", "error", err)
 		}
@@ -69,92 +83,148 @@ func main() {
 		attribute.String("nixie.flake", flags.Flake),
 		attribute.String("nixie.hosts_file", flags.HostsFile),
 	))
-	defer runSpan.End()
+	defer func() { telemetry.End(runSpan, runErr) }()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	checkReachableHosts(ctx, hostsConfig)
-	if hosts.AllInstalled(hostsConfig) {
-		log.Info("all hosts are already installed")
-		return
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	pending := 0
+
+	for _, host := range hostsConfig {
+		if host.GetState() != hosts.StateInstalled {
+			pending++
+		}
+	}
+
+	if pending == 0 {
+		log.Info("all hosts have reachable SSH, skipping provisioning")
+		return nil
+	}
+
+	sourceDir, err := os.MkdirTemp("", "nixie-source-")
+	if err != nil {
+		return fmt.Errorf("create source directory: %w", err)
+	}
+
+	defer os.RemoveAll(sourceDir)
+
+	sourceArchive := filepath.Join(sourceDir, "source.tar.gz")
+	directory, err := nixos.ArchiveFlake(ctx, flags.Flake, sourceArchive)
+	if err != nil {
+		return fmt.Errorf("snapshot flake source: %w", err)
+	}
+
+	sourceURL := &url.URL{
+		Scheme: "http",
+		Host:   net.JoinHostPort(address, "5000"),
+		Path:   "/source.tar.gz",
+	}
+
+	if directory != "" {
+		sourceURL.RawQuery = url.Values{"dir": {directory}}.Encode()
 	}
 
 	log.Info("building installer", "installer", flags.Installer)
 	installerComponents, err := nixos.BuildInstaller(ctx, flags.Installer, flags.Debug)
 	if err != nil {
-		runSpan.SetStatus(codes.Error, err.Error())
-		runSpan.RecordError(err)
-		log.Fatal("failed to build the installer", "error", err)
+		return fmt.Errorf("failed to build the installer: %w", err)
 	}
-	log.Debug("installer components", "kernel", installerComponents.Kernel, "initrd", installerComponents.Initrd, "init", installerComponents.Init)
+
+	log.Debug("installer components",
+		"kernel", installerComponents.Kernel,
+		"initrd", installerComponents.Initrd,
+		"init", installerComponents.Init,
+	)
 
 	pxeServer, err := pxe.NewPXEServer(
-		ctx,
 		address,
 		installerComponents.Kernel,
 		installerComponents.Initrd,
 		installerComponents.Init,
+		sourceURL.String(),
 		hostsConfig,
 	)
 	if err != nil {
-		runSpan.SetStatus(codes.Error, err.Error())
-		runSpan.RecordError(err)
-		log.Fatal("failed to create PXE server", "error", err)
+		return fmt.Errorf("failed to create PXE server: %w", err)
 	}
 
-	pxeErrCh := make(chan error, 1)
-	go func() {
-		pxeErrCh <- pxeServer.Serve()
-	}()
-	log.Info("PXE server started", "address", address)
+	results := make(chan error, pending)
+	serverErrors := make(chan error, 2)
+	var servers sync.WaitGroup
+	servers.Add(2)
 
-	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.InstallSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
-			log.Fatal("failed to start API server", "error", err)
-		}
+		defer servers.Done()
+		serverErrors <- pxeServer.Serve(ctx)
 	}()
 
-	// TODO probably need a better place to put these, maybe one go routine to manage each machine
+	go func() {
+		defer servers.Done()
+		serverErrors <- api.StartAPIServer(ctx, hostsConfig, address, sourceArchive, results)
+	}()
+
 	for name, host := range hostsConfig {
 		if host.GetState() == hosts.StateInstalled {
 			log.Debug("skipping installed host", "host", name, "mac", host.MACAddress)
 			continue
 		}
+
 		log.Info("sending magic packet", "mac", host.MACAddress)
 		mac, _ := net.ParseMAC(host.MACAddress)
 		network.SendWakeOnLAN(mac)
 	}
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	runErr = waitForHosts(ctx, pending, results, serverErrors)
+
+	cancel()
+	stopped := make(chan struct{})
+	go func() {
+		servers.Wait()
+		close(stopped)
+	}()
 
 	select {
-	case sig := <-sigCh:
-		log.Info("signal received, shutting down", "signal", sig)
-	case <-doneCh:
-		log.Info("all hosts installed, shutting down")
-	case err := <-pxeErrCh:
-		if err != nil {
-			runSpan.SetStatus(codes.Error, err.Error())
-			runSpan.RecordError(err)
-			log.Fatal("PXE server stopped unexpectedly", "error", err)
-		}
-		log.Fatal("PXE server stopped unexpectedly")
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		return errors.Join(runErr, errors.New("timed out stopping servers"))
 	}
 
-	pxeServer.Shutdown()
-	select {
-	case err := <-pxeErrCh:
-		if err != nil {
-			log.Warn("PXE server stopped with error", "error", err)
+	log.Info("nixie stopped")
+	return runErr
+}
+
+func waitForHosts(ctx context.Context, pending int, results, serverErrors <-chan error) error {
+	var resultErr error
+
+	for pending > 0 {
+		select {
+		case <-ctx.Done():
+			return errors.Join(resultErr, ctx.Err())
+
+		case err := <-serverErrors:
+			if ctx.Err() != nil {
+				return errors.Join(resultErr, ctx.Err(), err)
+			}
+
+			if err == nil {
+				err = errors.New("server stopped unexpectedly")
+			}
+
+			return errors.Join(resultErr, err)
+
+		case err := <-results:
+			resultErr = errors.Join(resultErr, err)
+			pending--
 		}
-	case <-time.After(5 * time.Second):
-		log.Warn("timed out waiting for PXE server to stop")
 	}
 
-	log.Info("nixie stopped gracefully")
+	return resultErr
 }
 
 func checkReachableHosts(ctx context.Context, hostsConfig hosts.HostsConfig) {

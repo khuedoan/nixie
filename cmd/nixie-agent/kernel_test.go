@@ -5,64 +5,22 @@ import (
 	"testing"
 )
 
-func TestParseKernelParams(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want map[string]string
-	}{
-		{
-			"Valid",
-			"kernel initrd=initrd0 init=/nix/store/nixos-installer-kexec/init loglevel=4 nixie_mac_address=bc:24:11:0d:2f:20 nixie_api=192.168.1.15:5000",
-			map[string]string{
-				"initrd":            "initrd0",
-				"init":              "/nix/store/nixos-installer-kexec/init",
-				"loglevel":          "4",
-				"nixie_mac_address": "bc:24:11:0d:2f:20",
-				"nixie_api":         "192.168.1.15:5000",
-			},
-		},
-		{
-			"OnlyMAC",
-			"kernel nixie_mac_address=aa:bb:cc:dd:ee:ff",
-			map[string]string{
-				"nixie_mac_address": "aa:bb:cc:dd:ee:ff",
-			},
-		},
-		{
-			"OnlyAPI",
-			"kernel nixie_api=192.168.1.100:5000",
-			map[string]string{
-				"nixie_api": "192.168.1.100:5000",
-			},
-		},
-		{
-			"Irrelevant",
-			"kernel root=/dev/sda1 ro quiet",
-			map[string]string{
-				"root": "/dev/sda1",
-			},
-		},
-		{
-			"Malformed",
-			"kernel nixie_api nixie_mac_address=aa:bb:cc:dd:ee:ff",
-			map[string]string{
-				"nixie_mac_address": "aa:bb:cc:dd:ee:ff",
-			},
-		},
-		{
-			"Empty",
-			"",
-			map[string]string{},
-		},
+func TestEncodedBootValues(t *testing.T) {
+	got, err := parseKernelParams("init=/nix/store/installer+source/init " +
+		"nixie_mac_address=02%3A00%3A00%3A00%3A00%3A01 " +
+		"nixie_api=%5Bfd00%3A%3A1%5D%3A5000 " +
+		"nixie_flake=http%3A%2F%2Fcontroller%2Fsource.tar.gz%3Fdir%3Dexample%2520dir%26rev%3Da%2Bb%23node+with+spaces")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseKernelParams(tt.in)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("parseKernelParams(%v) = %+v, want %+v", tt.in, got, tt.want)
-			}
-		})
+	want := map[string]string{
+		"init":              "/nix/store/installer+source/init",
+		"nixie_mac_address": "02:00:00:00:00:01",
+		"nixie_api":         "[fd00::1]:5000",
+		"nixie_flake":       "http://controller/source.tar.gz?dir=example%20dir&rev=a+b#node with spaces",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decoded boot values = %+v, want %+v", got, want)
 	}
 }

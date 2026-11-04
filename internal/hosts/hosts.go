@@ -15,6 +15,7 @@ type State int
 const (
 	StateUnknown State = iota
 	StateInstalling
+	StateVerifying
 	StateInstalled
 	StateFailed
 )
@@ -38,6 +39,31 @@ func (h *Host) SetState(state State) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.State = state
+}
+
+func (h *Host) CompareAndSwapState(from, to State) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.State != from {
+		return false
+	}
+
+	h.State = to
+	return true
+}
+
+// Fail records a terminal failure once, including failures during final verification.
+func (h *Host) Fail() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.State != StateInstalling && h.State != StateVerifying {
+		return false
+	}
+
+	h.State = StateFailed
+	return true
 }
 
 func LoadHostsConfig(filename string) (HostsConfig, error) {
@@ -100,15 +126,6 @@ func GetFlakeOutputByMAC(macAddress string, hostsConfig HostsConfig) (string, er
 			return flake, nil
 		}
 	}
+
 	return "", fmt.Errorf("unknown MAC address: %s", macAddress)
-}
-
-func AllInstalled(hostsConfig HostsConfig) bool {
-	for _, host := range hostsConfig {
-		if host.GetState() != StateInstalled {
-			return false
-		}
-	}
-
-	return true
 }

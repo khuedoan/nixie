@@ -10,9 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"code.khuedoan.com/nixie/internal/telemetry"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -22,14 +23,24 @@ type InstallerComponents struct {
 	Init   string
 }
 
-func nixBuild(ctx context.Context, flakeOutput string, debug bool) (string, error) {
-	_, span := otel.Tracer("nixie").Start(ctx, "nix.build", trace.WithAttributes(attribute.String("nix.flake_output", flakeOutput)))
-	defer span.End()
+func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (components InstallerComponents, err error) {
+	flakeOutput := flakeRef + ".config.system.build.nixieInstaller"
+	_, span := otel.Tracer("nixie").Start(ctx, "nixie.build_installer",
+		trace.WithAttributes(attribute.String("nix.flake_output", flakeOutput)),
+	)
+	defer func() { telemetry.End(span, err) }()
 
-	cmd := exec.CommandContext(ctx, "nix", "build", "--no-link", "--print-out-paths", flakeOutput)
+	cmd := exec.CommandContext(ctx, "nix", "build",
+		"--extra-experimental-features", "nix-command flakes",
+		"--no-write-lock-file",
+		"--no-link",
+		"--print-out-paths",
+		flakeOutput,
+	)
 
 	var stdout bytes.Buffer
 	stdoutWriters := []io.Writer{&stdout}
+
 	if debug {
 		stdoutWriters = append(stdoutWriters, os.Stdout)
 	}
@@ -37,27 +48,19 @@ func nixBuild(ctx context.Context, flakeOutput string, debug bool) (string, erro
 	cmd.Stdout = io.MultiWriter(stdoutWriters...)
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	if err = cmd.Run(); err != nil {
 		err = fmt.Errorf("nix build failed for %q: %w", flakeOutput, err)
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-		return "", err
-	}
-
-	outPath := strings.TrimSpace(stdout.String())
-	return outPath, nil
-}
-
-func BuildInstaller(ctx context.Context, flakeRef string, debug bool) (InstallerComponents, error) {
-	bundle, err := nixBuild(ctx, flakeRef+".config.system.build.nixieInstaller", debug)
-	if err != nil {
 		return InstallerComponents{}, err
 	}
+
+	bundle := strings.TrimSpace(stdout.String())
+
 	// The bundle itself is not in the netboot image; boot the original NixOS init path.
 	init, err := os.Readlink(filepath.Join(bundle, "init"))
 	if err != nil {
 		return InstallerComponents{}, fmt.Errorf("read installer init path: %w", err)
 	}
+
 	return InstallerComponents{
 		Kernel: filepath.Join(bundle, "kernel"),
 		Initrd: filepath.Join(bundle, "initrd"),
