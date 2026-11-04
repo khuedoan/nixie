@@ -19,15 +19,13 @@ import (
 )
 
 type API struct {
-	ctx               context.Context
-	hostsConfig       hosts.HostsConfig
-	flake             string
-	installSSHKey     string
-	deploymentSSHUser string
-	deploymentSSHKey  string
-	sshAgentSocket    string
-	debug             bool
-	doneCh            chan struct{}
+	ctx            context.Context
+	hostsConfig    hosts.HostsConfig
+	flake          string
+	installSSHKey  string
+	sshAgentSocket string
+	debug          bool
+	doneCh         chan struct{}
 }
 
 type InstallRequest struct {
@@ -101,7 +99,7 @@ func (api *API) install(w http.ResponseWriter, r *http.Request) {
 
 func (api *API) installHost(ctx context.Context, host *hosts.Host, flakeOutput, flake, ip string) (err error) {
 	ctx, span := otel.Tracer("nixie").Start(ctx, "api.install_host", trace.WithAttributes(
-		attribute.String("host.mac", host.MACAddress.String()),
+		attribute.String("host.mac", host.MACAddress),
 		attribute.String("net.peer.ip", ip),
 		attribute.String("nix.flake_output", flakeOutput),
 		attribute.String("nix.flake_ref", flake),
@@ -118,25 +116,24 @@ func (api *API) installHost(ctx context.Context, host *hosts.Host, flakeOutput, 
 		return fmt.Errorf("failed to install NixOS: %w", err)
 	}
 
-	if err := nixos.VerifyInstalledHost(ctx, api.deploymentSSHUser, host.IP, api.deploymentSSHKey, api.sshAgentSocket, api.debug); err != nil {
-		return fmt.Errorf("failed to verify installed host: %w", err)
+	fingerprint, err := nixos.ReadHostFingerprint(ctx, host.IP)
+	if err != nil {
+		return fmt.Errorf("failed to read final SSH host key: %w", err)
 	}
-	log.Info("successfully installed NixOS", "ip", host.IP, "flake", flake)
+	log.Info("successfully installed NixOS", "ip", host.IP, "flake", flake, "ssh_fingerprint", fingerprint)
 	host.SetState(hosts.StateInstalled)
 	return nil
 }
 
-func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, flake string, installSSHKey string, deploymentSSHUser string, deploymentSSHKey string, sshAgentSocket string, debug bool, doneCh chan struct{}) error {
+func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, flake string, installSSHKey string, sshAgentSocket string, debug bool, doneCh chan struct{}) error {
 	api := &API{
-		ctx:               ctx,
-		hostsConfig:       hostsConfig,
-		flake:             flake,
-		installSSHKey:     installSSHKey,
-		deploymentSSHUser: deploymentSSHUser,
-		deploymentSSHKey:  deploymentSSHKey,
-		sshAgentSocket:    sshAgentSocket,
-		debug:             debug,
-		doneCh:            doneCh,
+		ctx:            ctx,
+		hostsConfig:    hostsConfig,
+		flake:          flake,
+		installSSHKey:  installSSHKey,
+		sshAgentSocket: sshAgentSocket,
+		debug:          debug,
+		doneCh:         doneCh,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", api.ping)

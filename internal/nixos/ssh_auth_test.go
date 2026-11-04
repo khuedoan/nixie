@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-const testMachineID = "0123456789abcdef0123456789abcdef"
-
 func TestInstallUsesSSHAgentWithoutIdentityFile(t *testing.T) {
 	captureFile := installFakeCommand(t, "nixos-anywhere", "exit 0")
 	socket := "/run/user/1000/ssh-agent.sock"
@@ -21,38 +19,20 @@ func TestInstallUsesSSHAgentWithoutIdentityFile(t *testing.T) {
 	assertSSHInvocation(t, captureFile, socket, "")
 }
 
-func TestVerifyInstalledHostUsesSSHAgentWithoutIdentityFile(t *testing.T) {
-	captureFile := installFakeCommand(t, "ssh", `printf '%s\n' `+testMachineID)
-	socket := "/run/user/1000/ssh-agent.sock"
-
-	if err := VerifyInstalledHost(context.Background(), "root", "192.0.2.1", "", socket, false); err != nil {
-		t.Fatalf("VerifyInstalledHost() error = %v", err)
-	}
-
-	assertSSHInvocation(t, captureFile, socket, "")
-}
-
 func TestCommandsUseSSHKey(t *testing.T) {
 	tests := []struct {
 		name          string
 		command       string
 		commandResult string
-		run           func(context.Context, string) error
+		run           func(context.Context, string) (string, error)
+		wantResult    string
 	}{
 		{
 			name:          "install",
 			command:       "nixos-anywhere",
 			commandResult: "exit 0",
-			run: func(ctx context.Context, key string) error {
-				return Install(ctx, ".#claw", "root", "192.0.2.1", key, "", false)
-			},
-		},
-		{
-			name:          "verify installed host",
-			command:       "ssh",
-			commandResult: `printf '%s\n' ` + testMachineID,
-			run: func(ctx context.Context, key string) error {
-				return VerifyInstalledHost(ctx, "root", "192.0.2.1", key, "", false)
+			run: func(ctx context.Context, key string) (string, error) {
+				return "", Install(ctx, ".#claw", "root", "192.0.2.1", key, "", false)
 			},
 		},
 	}
@@ -63,8 +43,12 @@ func TestCommandsUseSSHKey(t *testing.T) {
 			captureFile := installFakeCommand(t, test.command, test.commandResult)
 			key := "/keys/id_ed25519"
 
-			if err := test.run(context.Background(), key); err != nil {
+			result, err := test.run(context.Background(), key)
+			if err != nil {
 				t.Fatalf("command error = %v", err)
+			}
+			if result != test.wantResult {
+				t.Fatalf("command result = %q, want %q", result, test.wantResult)
 			}
 
 			assertSSHInvocation(t, captureFile, "", key)

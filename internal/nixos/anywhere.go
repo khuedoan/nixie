@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -61,4 +62,19 @@ func Install(ctx context.Context, flakeRef, user, host, sshKey, sshAgentSocket s
 	}
 
 	return nil
+}
+
+func sshTarget(user, host string) string {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("%s@%s", user, host)
+}
+
+func sshEnv(sshAgentSocket string) []string {
+	env := os.Environ()
+	if sshAgentSocket != "" {
+		env = append(env, "SSH_AUTH_SOCK="+sshAgentSocket)
+	}
+	return env
 }

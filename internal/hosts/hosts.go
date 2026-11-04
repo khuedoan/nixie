@@ -1,8 +1,10 @@
 package hosts
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -11,7 +13,6 @@ import (
 type State int
 
 const (
-	// TODO maybe catch pixiecore events and/or ping to add booting/booted state
 	StateUnknown State = iota
 	StateInstalling
 	StateInstalled
@@ -19,10 +20,10 @@ const (
 )
 
 type Host struct {
-	MACAddress net.HardwareAddr
-	IP         string
-	state      State
-	mu         sync.RWMutex
+	MACAddress string       `json:"mac_address"`
+	IP         string       `json:"ip"`
+	State      State        `json:"-"`
+	mu         sync.RWMutex `json:"-"`
 }
 
 type HostsConfig map[string]*Host
@@ -30,13 +31,13 @@ type HostsConfig map[string]*Host
 func (h *Host) GetState() State {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.state
+	return h.State
 }
 
 func (h *Host) SetState(state State) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.state = state
+	h.State = state
 }
 
 func LoadHostsConfig(filename string) (HostsConfig, error) {
@@ -45,45 +46,57 @@ func LoadHostsConfig(filename string) (HostsConfig, error) {
 		return nil, fmt.Errorf("failed to read hosts file: %w", err)
 	}
 
-	var inventory map[string]struct {
-		MACAddress string `json:"mac_address"`
-		IP         string `json:"ip"`
-	}
-	if err := json.Unmarshal(data, &inventory); err != nil {
+	var hostsConfig HostsConfig
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&hostsConfig); err != nil {
 		return nil, fmt.Errorf("failed to parse hosts file: %w", err)
 	}
-	if inventory == nil {
-		return nil, fmt.Errorf("hosts file must contain a JSON object")
+
+	if decoder.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("hosts file must contain one JSON object")
 	}
 
-	hostsConfig := make(HostsConfig, len(inventory))
-	macs := make(map[string]string, len(inventory))
-	ips := make(map[string]string, len(inventory))
-	for name, entry := range inventory {
-		mac, err := net.ParseMAC(entry.MACAddress)
-		if err != nil || len(mac) != 6 || mac[0]&1 != 0 || mac.String() == "00:00:00:00:00:00" {
-			return nil, fmt.Errorf("host %q has invalid MAC address %q", name, entry.MACAddress)
+	macOwners := make(map[string]string, len(hostsConfig))
+	ipOwners := make(map[string]string, len(hostsConfig))
+
+	for name, host := range hostsConfig {
+		if host == nil {
+			return nil, fmt.Errorf("host %q must be an object", name)
 		}
-		ip := net.ParseIP(entry.IP)
+
+		mac, err := net.ParseMAC(host.MACAddress)
+		if err != nil {
+			return nil, fmt.Errorf("host %q has invalid MAC address %q: %w", name, host.MACAddress, err)
+		}
+
+		host.MACAddress = mac.String()
+		if owner, exists := macOwners[host.MACAddress]; exists {
+			return nil, fmt.Errorf("hosts %q and %q share MAC address %q", owner, name, host.MACAddress)
+		}
+
+		macOwners[host.MACAddress] = name
+
+		ip := net.ParseIP(host.IP)
 		if ip == nil {
-			return nil, fmt.Errorf("host %q has invalid IP address %q", name, entry.IP)
+			return nil, fmt.Errorf("host %q has invalid IP address %q", name, host.IP)
 		}
-		if other, exists := macs[mac.String()]; exists {
-			return nil, fmt.Errorf("hosts %q and %q share MAC address %s", other, name, mac)
+
+		host.IP = ip.String()
+		if owner, exists := ipOwners[host.IP]; exists {
+			return nil, fmt.Errorf("hosts %q and %q share IP address %q", owner, name, host.IP)
 		}
-		if other, exists := ips[ip.String()]; exists {
-			return nil, fmt.Errorf("hosts %q and %q share IP address %s", other, name, ip)
-		}
-		macs[mac.String()] = name
-		ips[ip.String()] = name
-		hostsConfig[name] = &Host{MACAddress: mac, IP: ip.String()}
+
+		ipOwners[host.IP] = name
 	}
+
 	return hostsConfig, nil
 }
 
 func GetFlakeOutputByMAC(macAddress string, hostsConfig HostsConfig) (string, error) {
 	for flake, config := range hostsConfig {
-		if config.MACAddress.String() == macAddress {
+		if config.MACAddress == macAddress {
 			return flake, nil
 		}
 	}

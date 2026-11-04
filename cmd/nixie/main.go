@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -74,7 +74,7 @@ func main() {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	checkInstalledHosts(ctx, hostsConfig)
+	checkReachableHosts(ctx, hostsConfig)
 	if hosts.AllInstalled(hostsConfig) {
 		log.Info("all hosts are already installed")
 		return
@@ -111,7 +111,7 @@ func main() {
 
 	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.InstallSSHKey, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
+		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.InstallSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
@@ -123,7 +123,8 @@ func main() {
 			continue
 		}
 		log.Info("sending magic packet", "mac", host.MACAddress)
-		network.SendWakeOnLAN(host.MACAddress)
+		mac, _ := net.ParseMAC(host.MACAddress)
+		network.SendWakeOnLAN(mac)
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -156,22 +157,30 @@ func main() {
 	log.Info("nixie stopped gracefully")
 }
 
-func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig) {
+func checkReachableHosts(ctx context.Context, hostsConfig hosts.HostsConfig) {
 	var wg sync.WaitGroup
+
 	for name, host := range hostsConfig {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
-			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			keys, _ := exec.CommandContext(probeCtx, "ssh-keyscan", "-T", "5", host.IP).Output()
-			if len(keys) > 0 {
-				host.SetState(hosts.StateInstalled)
-				log.Info("SSH reachable, skipping installation", "host", name, "ip", host.IP)
+			fingerprint, err := nixos.ReadHostFingerprint(checkCtx, host.IP)
+			if err != nil {
+				return
 			}
+
+			host.SetState(hosts.StateInstalled)
+			log.Info("SSH reachable, skipping installation",
+				"host", name,
+				"ip", host.IP,
+				"fingerprint", fingerprint,
+			)
 		}()
 	}
+
 	wg.Wait()
 }
