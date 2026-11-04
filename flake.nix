@@ -127,6 +127,20 @@
           ...
         }:
         {
+          system.build.nixieInstaller = pkgs.linkFarm "nixie-installer" [
+            {
+              name = "kernel";
+              path = "${config.system.build.kernel}/bzImage";
+            }
+            {
+              name = "initrd";
+              path = "${config.system.build.netbootRamdisk}/initrd";
+            }
+            {
+              name = "init";
+              path = "${config.system.build.toplevel}/init";
+            }
+          ];
           systemd.services.nixie-agent = {
             description = "Nixie Agent";
             wantedBy = [ "multi-user.target" ];
