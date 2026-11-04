@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"code.khuedoan.com/nixie/internal/protocol"
+
+	"golang.org/x/sys/unix"
 )
 
 type statusReporter struct {
@@ -82,4 +85,35 @@ func (reporter statusReporter) send(ctx context.Context, result protocol.Install
 	}
 
 	return lastErr
+}
+
+// reportBoot measures kernel startup through agent admission, at second resolution.
+func (reporter statusReporter) reportBoot(ctx context.Context) {
+	var info unix.Sysinfo_t
+	if err := unix.Sysinfo(&info); err != nil {
+		log.Printf("read installer uptime: %v", err)
+		return
+	}
+
+	started := time.Now().Add(-time.Duration(info.Uptime) * time.Second)
+	reporter.reportPhase(ctx, protocol.PhaseBoot, started, nil)
+}
+
+func (reporter statusReporter) reportPhase(ctx context.Context, phase protocol.InstallPhase, started time.Time, phaseErr error) {
+	result := protocol.InstallResult{
+		Status:   protocol.StatusProgress,
+		Phase:    phase,
+		Duration: time.Since(started),
+	}
+
+	if phaseErr != nil {
+		result.Error = phaseErr.Error()
+	}
+
+	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+
+	if err := reporter.send(reportCtx, result); err != nil {
+		log.Printf("report completed phase %s: %v", phase, err)
+	}
 }

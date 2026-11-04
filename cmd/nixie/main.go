@@ -143,6 +143,7 @@ func run() (runErr error) {
 	)
 
 	pxeServer, err := pxe.NewPXEServer(
+		ctx,
 		address,
 		installerComponents.Kernel,
 		installerComponents.Initrd,

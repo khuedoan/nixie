@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -65,6 +66,12 @@ func (api *API) status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch result.Status {
+	case protocol.StatusProgress:
+		if err := api.recordPhase(name, result); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 	case protocol.StatusFailed:
 		api.failHost(host, name, errors.New(result.Error))
 
@@ -84,6 +91,40 @@ func (api *API) status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (api *API) recordPhase(name string, result protocol.InstallResult) error {
+	switch result.Phase {
+	case protocol.PhaseBoot,
+		protocol.PhaseBuildDisko,
+		protocol.PhasePartition,
+		protocol.PhaseInstallSystem,
+		protocol.PhaseReboot:
+	default:
+		return errors.New("unknown installation phase")
+	}
+
+	if result.Duration < 0 {
+		return errors.New("phase duration must be nonnegative")
+	}
+
+	finishedAt := time.Now()
+	startedAt := finishedAt.Add(-result.Duration)
+	_, span := otel.Tracer("nixie").Start(api.ctx, "agent."+string(result.Phase),
+		trace.WithTimestamp(startedAt),
+		trace.WithAttributes(
+			attribute.String("host.mac", result.MACAddress),
+			attribute.String("host.name", name),
+		),
+	)
+
+	if result.Error != "" {
+		span.RecordError(errors.New(result.Error), trace.WithTimestamp(finishedAt))
+		span.SetStatus(codes.Error, result.Error)
+	}
+
+	span.End(trace.WithTimestamp(finishedAt))
+	return nil
 }
 
 func (api *API) verifyHost(ctx context.Context, host *hosts.Host, name string) {

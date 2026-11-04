@@ -18,6 +18,7 @@ func TestBootSpecCarriesCompleteEncodedFlakeReference(t *testing.T) {
 
 	host := &hosts.Host{MACAddress: mac.String()}
 	booter := &PXEBooter{
+		ctx:     t.Context(),
 		Address: "fd00::1", Init: "/nix/store/installer+source/init",
 		Flake:       "http://controller/source.tar.gz?dir=example%20directory&rev=a+b",
 		HostsConfig: hosts.HostsConfig{"node with spaces": host},

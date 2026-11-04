@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"code.khuedoan.com/nixie/internal/protocol"
 )
@@ -17,16 +18,23 @@ func installFlake(ctx context.Context, flake string, reporter statusReporter) er
 		return err
 	}
 
+	reporter.reportBoot(ctx)
+
+	started := time.Now()
 	disko, err := buildDisko(ctx, flake)
+	reporter.reportPhase(ctx, protocol.PhaseBuildDisko, started, err)
 	if err != nil {
 		return fmt.Errorf("build disko script: %w", err)
 	}
 
+	started = time.Now()
 	err = runLocal(ctx, disko)
+	reporter.reportPhase(ctx, protocol.PhasePartition, started, err)
 	if err != nil {
 		return fmt.Errorf("partition target disks: %w", err)
 	}
 
+	started = time.Now()
 	err = runLocal(ctx, "nixos-install",
 		"--flake", flake,
 		"--root", "/mnt",
@@ -34,6 +42,7 @@ func installFlake(ctx context.Context, flake string, reporter statusReporter) er
 		"--no-channel-copy",
 		"--no-write-lock-file",
 	)
+	reporter.reportPhase(ctx, protocol.PhaseInstallSystem, started, err)
 	if err != nil {
 		return err
 	}
@@ -42,7 +51,9 @@ func installFlake(ctx context.Context, flake string, reporter statusReporter) er
 		return err
 	}
 
+	started = time.Now()
 	err = scheduleReboot(ctx)
+	reporter.reportPhase(ctx, protocol.PhaseReboot, started, err)
 	return err
 }
 
