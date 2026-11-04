@@ -1,8 +1,10 @@
 {
   "machine1": {
-    "mac_address": "bc:24:11:d0:28:34"
+    "mac_address": "bc:24:11:d0:28:34",
+    "ip": "192.168.50.11"
   },
   "machine2": {
-    "mac_address": "bc:24:11:0d:2f:20"
+    "mac_address": "bc:24:11:0d:2f:20",
+    "ip": "192.168.50.12"
   }
 }

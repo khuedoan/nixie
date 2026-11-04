@@ -1,7 +1,6 @@
 package pxe
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -41,7 +40,7 @@ func (b *PXEBooter) BootSpec(m pixiecore.Machine) (*pixiecore.Spec, error) {
 	defer span.End()
 
 	for flakeOutput, hostConfig := range b.HostsConfig {
-		if bytes.Equal(hostConfig.MACAddress, m.MAC) {
+		if hostConfig.MACAddress == m.MAC.String() {
 			span.SetAttributes(attribute.String("nix.flake_output", flakeOutput))
 			if hostConfig.GetState() != hosts.StateUnknown {
 				span.SetAttributes(

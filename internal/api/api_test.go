@@ -22,8 +22,6 @@ func TestInstallUsesConfiguredFinalAddress(t *testing.T) {
 		wantIP   string
 	}{
 		{name: "configured", hostJSON: `{"mac_address":"02:00:00:00:00:01","ip":"192.0.2.10"}`, wantIP: "192.0.2.10"},
-		{name: "empty", hostJSON: `{"mac_address":"02:00:00:00:00:01","ip":""}`, wantIP: "192.0.2.20"},
-		{name: "omitted", hostJSON: `{"mac_address":"02:00:00:00:00:01"}`, wantIP: "192.0.2.20"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
@@ -46,7 +44,7 @@ func TestInstallUsesConfiguredFinalAddress(t *testing.T) {
 			defer cancel()
 			api := &API{
 				ctx: ctx, hostsConfig: hosts.HostsConfig{"node": host},
-				hostsFile: filepath.Join(directory, "hosts.json"), flake: ".",
+				flake:             ".",
 				deploymentSSHUser: "admin", sshAgentSocket: "/test/agent.sock",
 				doneCh: make(chan struct{}, 1),
 			}
@@ -74,13 +72,7 @@ func TestInstallUsesConfiguredFinalAddress(t *testing.T) {
 					t.Errorf("%s did not target %s: %s", command, target, data)
 				}
 			}
-			saved, err := hosts.LoadHostsConfig(api.hostsFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if saved["node"].IP != test.wantIP || saved["node"].MachineIDHash != "dada2cfcc22d3f6285b65cf851d8582adeeb8d70f7f0fcfe9402cbef732b23ec" {
-				t.Fatalf("saved identity = (%q, %q), want configured/discovered IP and new machine hash", saved["node"].IP, saved["node"].MachineIDHash)
-			}
+
 		})
 	}
 }

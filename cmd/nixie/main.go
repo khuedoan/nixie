@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -110,7 +111,7 @@ func main() {
 
 	doneCh := make(chan struct{}, 1)
 	go func() {
-		if err := api.StartAPIServer(ctx, hostsConfig, flags.HostsFile, flags.Flake, flags.InstallSSHKey, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
+		if err := api.StartAPIServer(ctx, hostsConfig, flags.Flake, flags.InstallSSHKey, flags.DeploymentSSHUser, flags.DeploymentSSHKey, flags.SSHAgentSocket, flags.Debug, doneCh); err != nil {
 			log.Fatal("failed to start API server", "error", err)
 		}
 	}()
@@ -122,7 +123,8 @@ func main() {
 			continue
 		}
 		log.Info("sending magic packet", "mac", host.MACAddress)
-		network.SendWakeOnLAN(host.MACAddress)
+		mac, _ := net.ParseMAC(host.MACAddress)
+		network.SendWakeOnLAN(mac)
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -155,39 +157,20 @@ func main() {
 	log.Info("nixie stopped gracefully")
 }
 
-func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig, deploymentSSHUser string, deploymentSSHKey string, sshAgentSocket string, debug bool) {
+func checkInstalledHosts(ctx context.Context, hostsConfig hosts.HostsConfig, deploymentSSHUser, deploymentSSHKey, sshAgentSocket string, debug bool) {
 	var wg sync.WaitGroup
 	for name, host := range hostsConfig {
-		storedIP := host.IP
-		storedMachineIDHash := host.MachineIDHash
-		if storedMachineIDHash == "" {
-			continue
-		}
-
-		host.SetState(hosts.StateInstalled)
-		if storedIP == "" {
-			log.Warn("installed host has no IP, skipping status check", "host", name, "mac", host.MACAddress)
-			continue
-		}
-
 		wg.Add(1)
-		go func(name, storedIP, storedMachineIDHash string) {
+		go func() {
 			defer wg.Done()
-
-			checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			machineIDHash, err := nixos.ReadMachineIDHash(checkCtx, deploymentSSHUser, storedIP, deploymentSSHKey, sshAgentSocket, debug)
-			if err != nil {
-				log.Warn("failed to check installed host, skipping reinstall", "host", name, "ip", storedIP, "error", err)
+			if _, err := nixos.ReadMachineIDHash(checkCtx, deploymentSSHUser, host.IP, deploymentSSHKey, sshAgentSocket, debug); err != nil {
 				return
 			}
-			if machineIDHash != storedMachineIDHash {
-				log.Warn("installed host machine ID hash mismatch, skipping reinstall", "host", name, "ip", storedIP, "expected", storedMachineIDHash, "actual", machineIDHash)
-				return
-			}
-
-			log.Info("installed host verified, skipping reinstall", "host", name, "ip", storedIP)
-		}(name, storedIP, storedMachineIDHash)
+			host.SetState(hosts.StateInstalled)
+			log.Info("SSH reachable, skipping installation", "host", name, "ip", host.IP)
+		}()
 	}
 	wg.Wait()
 }

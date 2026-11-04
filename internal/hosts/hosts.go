@@ -1,11 +1,13 @@
 package hosts
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -15,7 +17,6 @@ import (
 type State int
 
 const (
-	// TODO maybe catch pixiecore events and/or ping to add booting/booted state
 	StateUnknown State = iota
 	StateInstalling
 	StateInstalled
@@ -23,63 +24,13 @@ const (
 )
 
 type Host struct {
-	MACAddress    net.HardwareAddr `json:"mac_address"`
-	IP            string           `json:"ip,omitempty"`
-	MachineIDHash string           `json:"machine_id_hash,omitempty"`
-	State         State            `json:"-"`
-	mu            sync.RWMutex     `json:"-"`
+	MACAddress string       `json:"mac_address"`
+	IP         string       `json:"ip"`
+	State      State        `json:"-"`
+	mu         sync.RWMutex `json:"-"`
 }
 
 type HostsConfig map[string]*Host
-
-func (h *Host) UnmarshalJSON(data []byte) error {
-	var aux struct {
-		MACAddress    string `json:"mac_address"`
-		IP            string `json:"ip"`
-		MachineIDHash string `json:"machine_id_hash"`
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	mac, err := net.ParseMAC(aux.MACAddress)
-	if err != nil {
-		return fmt.Errorf("invalid MAC address %q: %w", aux.MACAddress, err)
-	}
-
-	h.MACAddress = mac
-	if aux.IP != "" {
-		ip := net.ParseIP(aux.IP)
-		if ip == nil {
-			return fmt.Errorf("invalid IP address %q", aux.IP)
-		}
-		h.IP = ip.String()
-	}
-	h.MachineIDHash = strings.TrimSpace(aux.MachineIDHash)
-	return nil
-}
-
-func (h *Host) MarshalJSON() ([]byte, error) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	return json.Marshal(struct {
-		MACAddress    string `json:"mac_address"`
-		IP            string `json:"ip,omitempty"`
-		MachineIDHash string `json:"machine_id_hash,omitempty"`
-	}{
-		MACAddress:    h.MACAddress.String(),
-		IP:            h.IP,
-		MachineIDHash: h.MachineIDHash,
-	})
-}
-
-func (h *Host) GetIP() string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.IP
-}
 
 func (h *Host) GetState() State {
 	h.mu.RLock()
@@ -93,15 +44,6 @@ func (h *Host) SetState(state State) {
 	h.State = state
 }
 
-func (h *Host) SetFinalIdentity(ip string, machineIDHash string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.IP == "" {
-		h.IP = ip
-	}
-	h.MachineIDHash = machineIDHash
-}
-
 func LoadHostsConfig(filename string) (HostsConfig, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -109,25 +51,70 @@ func LoadHostsConfig(filename string) (HostsConfig, error) {
 	}
 
 	var hostsConfig HostsConfig
-	if err := json.Unmarshal(data, &hostsConfig); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&hostsConfig); err != nil {
 		return nil, fmt.Errorf("failed to parse hosts file: %w", err)
+	}
+
+	if decoder.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("hosts file must contain one JSON object")
+	}
+
+	macOwners := make(map[string]string, len(hostsConfig))
+	ipOwners := make(map[string]string, len(hostsConfig))
+
+	for name, host := range hostsConfig {
+		if host == nil {
+			return nil, fmt.Errorf("host %q must be an object", name)
+		}
+
+		mac, err := net.ParseMAC(host.MACAddress)
+		if err != nil {
+			return nil, fmt.Errorf("host %q has invalid MAC address %q: %w", name, host.MACAddress, err)
+		}
+
+		host.MACAddress = mac.String()
+		if owner, exists := macOwners[host.MACAddress]; exists {
+			return nil, fmt.Errorf("hosts %q and %q share MAC address %q", owner, name, host.MACAddress)
+		}
+
+		macOwners[host.MACAddress] = name
+
+		ip := net.ParseIP(host.IP)
+		if ip == nil {
+			return nil, fmt.Errorf("host %q has invalid IP address %q", name, host.IP)
+		}
+
+		host.IP = ip.String()
+		if owner, exists := ipOwners[host.IP]; exists {
+			return nil, fmt.Errorf("hosts %q and %q share IP address %q", owner, name, host.IP)
+		}
+
+		ipOwners[host.IP] = name
 	}
 
 	return hostsConfig, nil
 }
 
-func SaveHostsConfig(filename string, hostsConfig HostsConfig) error {
-	data, err := json.MarshalIndent(hostsConfig, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to encode hosts file: %w", err)
+func GetFlakeOutputByMAC(macAddress string, hostsConfig HostsConfig) (string, error) {
+	for flake, config := range hostsConfig {
+		if config.MACAddress == macAddress {
+			return flake, nil
+		}
 	}
-	data = append(data, '\n')
+	return "", fmt.Errorf("unknown MAC address: %s", macAddress)
+}
 
-	if err := os.WriteFile(filename, data, 0o644); err != nil {
-		return fmt.Errorf("failed to write hosts file: %w", err)
+func AllInstalled(hostsConfig HostsConfig) bool {
+	for _, host := range hostsConfig {
+		if host.GetState() != StateInstalled {
+			return false
+		}
 	}
 
-	return nil
+	return true
 }
 
 func HashMachineID(machineID string) (string, error) {
@@ -145,23 +132,4 @@ func HashMachineID(machineID string) (string, error) {
 	mac := hmac.New(sha256.New, []byte("code.khuedoan.com/nixie/machine-id/v1"))
 	mac.Write([]byte(machineID))
 	return hex.EncodeToString(mac.Sum(nil)), nil
-}
-
-func GetFlakeOutputByMAC(macAddress string, hostsConfig HostsConfig) (string, error) {
-	for flake, config := range hostsConfig {
-		if config.MACAddress.String() == macAddress {
-			return flake, nil
-		}
-	}
-	return "", fmt.Errorf("unknown MAC address: %s", macAddress)
-}
-
-func AllInstalled(hostsConfig HostsConfig) bool {
-	for _, host := range hostsConfig {
-		if host.GetState() != StateInstalled {
-			return false
-		}
-	}
-
-	return true
 }

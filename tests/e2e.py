@@ -27,7 +27,6 @@ REQUIRED_ENV = ("NIXIE_BIN", "OVMF_CODE", "OVMF_VARS")
 FAILURES = (
     "failed to install NixOS",
     "failed to read final machine ID",
-    "failed to save hosts config",
 )
 SSH_SEED = bytes.fromhex("62d7724c580bc35680ef58daa05ddbdf8ce37f3de511d246973f64c227c8d8e7")
 SSH_OPTS = (
@@ -184,18 +183,15 @@ def load_machines(hosts_path):
         mac = host.get("mac_address")
         if not mac:
             raise RuntimeError(f"missing MAC address for {name} in {hosts_path}")
-        machines.append({"name": name, "mac": mac, "ip": f"192.168.50.{10 + index}"})
+        machines.append({"name": name, "mac": mac, "ip": host["ip"]})
     if not machines:
         raise RuntimeError(f"no hosts defined in {hosts_path}")
     return machines
 
 
-def check_hosts(hosts_path, machines):
-    hosts = json.loads(hosts_path.read_text())
-    for machine in machines:
-        host = hosts[machine["name"]]
-        if host.get("ip") != machine["ip"] or len(host.get("machine_id_hash", "")) != 64:
-            raise RuntimeError(f"unexpected generated host data for {machine['name']}")
+def check_hosts(hosts_path, inventory):
+    if hosts_path.read_bytes() != inventory:
+        raise RuntimeError("Nixie modified the read-only inventory")
 
 
 def start_vm(machine, tap, workdir, initialize_disk):
@@ -283,6 +279,7 @@ def main():
     workdir = Path(".")
     flake = Path("examples")
     hosts_path = flake / "hosts.json"
+    inventory = hosts_path.read_bytes()
     key_path = write_key(workdir)
     machines = load_machines(hosts_path)
     taps = [f"tapn{index + 1}" for index in range(len(machines))]
@@ -300,7 +297,7 @@ def main():
 
         qemus = [start_vm(machine, tap, workdir, True) for machine, tap in zip(machines, taps, strict=True)]
         wait_nixie(nixie)
-        check_hosts(hosts_path, machines)
+        check_hosts(hosts_path, inventory)
         verify_ssh(machines, key_path, TIMEOUT["ssh"], "verified")
 
         log("power cycling machines to verify disk boot without the installer")
