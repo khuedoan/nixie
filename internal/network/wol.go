@@ -25,6 +25,7 @@ func buildMacicPacket(mac net.HardwareAddr) []byte {
 	for range syncStreamLength {
 		packet = append(packet, 0xFF)
 	}
+
 	for range macRepeat {
 		packet = append(packet, mac...)
 	}
@@ -47,6 +48,7 @@ func SendWakeOnLAN(mac net.HardwareAddr) error {
 	if err != nil {
 		return fmt.Errorf("failed to dial UDP broadcast: %w", err)
 	}
+
 	defer conn.Close()
 
 	if _, err = conn.Write(magicPacket); err != nil {

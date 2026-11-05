@@ -46,6 +46,7 @@
 
       agentSource = mkGoSource [
         ./cmd/nixie-agent
+        ./internal/protocol
       ];
 
       app = pkgs.buildGoApplication {
@@ -63,8 +64,8 @@
             --prefix PATH : ${
               pkgs.lib.makeBinPath [
                 pkgs.nix
-                pkgs.nixos-anywhere
-                pkgs.openssh
+                pkgs.gnutar
+                pkgs.gzip
               ]
             }
         '';
@@ -76,13 +77,18 @@
         src = agentSource;
         modules = ./gomod2nix.toml;
         subPackages = [ "./cmd/nixie-agent" ];
+        nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+        postFixup = ''
+          wrapProgram "$out/bin/nixie-agent" \
+            --prefix PATH : ${pkgs.lib.makeBinPath [
+              pkgs.nix
+              pkgs.gitMinimal
+              pkgs.nixos-install-tools
+              pkgs.util-linux
+              pkgs.systemd
+            ]}
+        '';
       };
-
-      python = pkgs.python3.withPackages (
-        ps: with ps; [
-          cryptography
-        ]
-      );
 
       e2eRunner = pkgs.writeShellApplication {
         name = "nixie-e2e";
@@ -90,19 +96,19 @@
           dnsmasq
           git
           iproute2
+          iptables
           nix
-          nixos-anywhere
           opentelemetry-collector
           openssh
           OVMF.fd
-          python
+          python3
           qemu_kvm
         ];
         text = ''
           export NIXIE_BIN="${app}/bin/nixie"
           export OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"
           export OVMF_VARS="${pkgs.OVMF.fd}/FV/OVMF_VARS.fd"
-          exec ${python}/bin/python3 "${self.outPath}/tests/e2e.py" "$@"
+          exec ${pkgs.python3}/bin/python3 "${self.outPath}/tests/e2e.py" "$@"
         '';
       };
 
@@ -122,17 +128,34 @@
       nixosModules.nixie-agent =
         {
           config,
-          lib,
           pkgs,
           ...
         }:
         {
+          system.build.nixieInstaller = pkgs.linkFarm "nixie-installer" [
+            {
+              name = "kernel";
+              path = "${config.system.build.kernel}/bzImage";
+            }
+            {
+              name = "initrd";
+              path = "${config.system.build.netbootRamdisk}/initrd";
+            }
+            {
+              name = "init";
+              path = "${config.system.build.toplevel}/init";
+            }
+          ];
           systemd.services.nixie-agent = {
             description = "Nixie Agent";
             wantedBy = [ "multi-user.target" ];
+            wants = [ "network-online.target" ];
+            after = [ "network-online.target" ];
             serviceConfig = {
               ExecStart = "${self.packages.${system}."nixie-agent"}/bin/nixie-agent";
-              Restart = "on-failure";
+              Restart = "no";
+              User = "root";
+              StandardOutput = "journal+console";
             };
           };
         };
@@ -143,8 +166,8 @@
           pkgs.gomod2nix
           pkgs.gnumake
           pkgs.nixfmt-tree
-          # TODO maybe embed this into the binary?
-          pkgs.nixos-anywhere
+          pkgs.nix
+          pkgs.openssh
         ];
       };
     };

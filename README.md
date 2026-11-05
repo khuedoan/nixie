@@ -22,11 +22,11 @@ Currently, only `x86_64-linux` is supported.
 - [x] Simple, declarative JSON host inventory
 - [x] Build a custom NixOS installer from a flake
 - [x] Built-in PXE server based on [Pixiecore](https://github.com/danderson/netboot/tree/main/pixiecore) to serve netboot components from the custom installer
-- [x] Install NixOS from a flake using [nixos-anywhere](https://nix-community.github.io/nixos-anywhere)
+- [x] Install NixOS from a flake using Nix, disko, and nixos-install
 - [x] Remote power-on with [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN)
-- [x] Host IP discovery via callback
+- [x] Read-only host inventory with fixed IP addresses
 - [x] Ephemeral PXE server [^1]
-- [x] Fast, under 2 minutes to install NixOS from empty hard drives [^2]
+- [x] Concurrent installation across hosts
 - [ ] Support IPv6 single-stack
 
 [^1]: No pre-configured PXE server is required to install other machines - you
@@ -34,10 +34,6 @@ Currently, only `x86_64-linux` is supported.
     "first machine in the data center" problem: in bare-metal setups with
     persistent PXE servers, you would otherwise need to automate the installation
     of the PXE server itself.
-[^2]: Using the provided examples with a warm cache on a 1 Gbps network.
-    Factors that affect the speed include whether the configuration has been
-    cached in the Nix store, the size of the NixOS configuration, the network
-    speed, etc.
 
 ## Usage
 
@@ -51,12 +47,11 @@ multiple bare-metal machines based on the MAC addresses defined in
 sudo nixie \
     --installer ./examples#nixosConfigurations.installer \
     --flake ./examples \
-    --hosts ./examples/hosts.json \
-    --install-ssh-key ~/.ssh/nixie-install \
-    --deployment-ssh-user root \
-    --deployment-ssh-key ~/.ssh/nixie-deployment \
-    --ssh-agent-socket "$SSH_AUTH_SOCK"
+    --hosts ./examples/hosts.json
 ```
+
+Nixie detects a local IPv4 address automatically. Use `--address` to select the
+controller’s IP on the provisioning network when needed.
 
 If the machine that runs Nixie has a firewall, open these ports:
 
@@ -79,43 +74,68 @@ TODO add a demo video/asciinema.
 
 See the full example in [`./examples`](./examples).
 
-By default, Nixie authenticates through `ssh-agent`. Ensure the agent contains
-the keys authorized by both
-[`./examples/installer.nix`](./examples/installer.nix) and the installed system
-in [`./examples/configuration.nix`](./examples/configuration.nix).
+The installer receives its source URL and host configuration through PXE boot
+parameters. No SSH access or installer SSH key is required.
 
-You can override the agent socket with `--ssh-agent-socket`.
-Alternatively, specify the keys directly with `--install-ssh-key` and `--deployment-ssh-key`.
+Every inventory entry requires a unique MAC address and a unique fixed IP
+address. Configure that IP in NixOS or reserve it in DHCP. Nixie does not
+discover addresses or modify the inventory.
 
-Nixie uses `ip` for status checks via SSH after installation:
+Before provisioning, Nixie probes SSH at each configured IP. Reachable hosts are
+left alone. Unreachable hosts are eligible for installation, including previously
+installed hosts that are offline. Running Nixie authorizes provisioning those
+listed hosts; the configured IP must belong to the intended machine.
 
-- For DHCP, leave `ip` unset and let Nixie discover and save it.
-- For a static IP, set `ip` to the desired address and configure the same address
-  in NixOS, or have your NixOS configuration read it from the JSON file.
+Nixie reports "installation complete, reboot scheduled" once the agent has
+installed NixOS and successfully scheduled a reboot through systemd. It then
+finishes without connecting to the installed system. This does not establish
+that the installed OS has booted or is ready; downstream deployment and E2E
+checks own readiness. Reboot scheduling failures fail the installation.
 
-After a successful installation, Nixie records the machine ID hash and fills
-in `ip` only when it was omitted or empty:
+The startup SSH check reads an Ed25519 host key on port 22 without logging in.
+No authorized user key, private key, or SSH agent is required. Installer SSH
+can use its normal port; it is not used as a post-install completion signal.
 
-```diff
- {
-   "machine1": {
--    "mac_address": "bc:24:11:d0:28:34"
-+    "mac_address": "bc:24:11:d0:28:34",
-+    "ip": "192.168.50.11",
-+    "machine_id_hash": "4bb69b8af140798fdab9cc04d2a1ad994af8ac9ca82db6df3f59133880872512"
-   },
-   "machine2": {
--    "mac_address": "bc:24:11:0d:2f:20"
-+    "mac_address": "bc:24:11:0d:2f:20",
-+    "ip": "192.168.50.12",
-+    "machine_id_hash": "9d307ce2870d0fdeef56348ac310a8743c1a8569b5131061fa9c487c64213067"
-   }
- }
-```
+Nixie supports only its custom x86_64 NixOS installer with
+`nixosModules.nixie-agent`. The module supplies the agent and its tools, runs it
+as root and prevents automatic installation restarts.
+It also exposes `system.build.nixieInstaller`, a single bundle containing the
+kernel, initrd, and init path that the controller builds for PXE.
+
+The controller snapshots the flake source once and serves that archive to every
+host. Nix filters Git sources to tracked files, including tracked working-tree
+changes. Local path inputs must remain inside that source tree. Keep secrets
+outside the source tree and the Nix store.
+
+The agent builds and runs disko, then runs `nixos-install --flake` to build the
+system directly in the mounted target store and install it. Hosts need network
+access to fetch remote flake inputs and dependencies from their configured Nix
+caches. Hosts install concurrently. Nixie provides no build cache or extra-file
+transfer.
+
+Source delivery uses unauthenticated HTTP on the provisioning address, like PXE
+image delivery. Use a trusted provisioning LAN. The source controls code that
+runs as root, so public contents alone do not provide authenticity. Normal Nix
+signature checks remain enabled for downloaded dependencies.
+
+The agent uses one `/status` callback for admission, completed phases, errors,
+and completion. It waits for admission before destructive operations. Only after
+reboot scheduling succeeds does it report completion and wait for acknowledgment.
+The scheduled reboot does not depend on receiving that acknowledgment. Progress
+reports are best effort.
+Each host produces one final result. Other hosts continue installing after a
+failure, and Nixie exits with an error after collecting all results. Interrupting
+a run also exits with an error.
+
+The per-host trace includes PXE boot requests and an `agent.boot` stage measured
+from kernel startup through agent admission, at second resolution. This covers
+initrd, system startup, and networking; firmware time is excluded. Pixiecore has
+no native OpenTelemetry hooks, so Nixie traces its boot-configuration callback.
+
+The controller exports traces using agent-measured durations and timestamps
+estimated from report arrival. The agent does not connect to the collector.
 
 ## How it works
-
-TODO refine the diagram after implementation.
 
 ```mermaid
 sequenceDiagram
@@ -127,7 +147,7 @@ sequenceDiagram
 
     loop For each machine
     Nixie->>Machines: Try checking status
-    Nixie->>Nixie: Skip if already installed
+    Nixie->>Nixie: Skip if SSH is reachable
     end
 
     Nixie->>Nix: Build installer components<br/>(kernel, initrd, squashfs)
@@ -149,26 +169,19 @@ sequenceDiagram
 
         Note over Machines: Boot into NixOS installer
         Note over Machines: SystemD starts nixie-agent service
-        Machines->>Nixie: nixie-agent phone home to request install with MAC address
-        Nixie->>Nixie: Find flake based on MAC address and get client IP from API request
-        Nixie->>Nix: Build NixOS configuration
-        Nixie->>Machines: nixos-anywhere format disks via SSH based on disko configuration
-        Nixie->>Machines: nixos-anywhere install system closure via SSH
-        Nixie->>Machines: nixos-anywhere trigger reboot
-
-        Note over Machines: Reboot after installation completed
-
-        Nixie->>Machines: nixos-anywhere confirms machine rebooted
-        Nixie->>Machines: Read final /etc/machine-id over SSH
-        Nixie->>Nixie: Write IP and machine ID hash to hosts.json
+        Note over Machines: Boot parameters select source URL and configuration
+        Machines->>Nixie: Report started and wait for admission
+        Machines->>Nixie: Fetch shared source archive
+        Machines->>Machines: Build and run disko to partition and mount disks
+        Machines->>Machines: nixos-install --flake builds into target store and installs
+        Machines->>Machines: Schedule reboot through systemd
+        Machines->>Nixie: Report installation complete, reboot scheduled
+        Nixie-->>Machines: Acknowledge result
         deactivate Machines
-
-        activate Machines
-
-        Nixie->>Machines: Check host status
     end
 
-    Note over Nixie: Return when all machines are installed
+    Note over Nixie: Return when all machines report a final result
+    Note over Machines: Reboot and final-system readiness are not checked by Nixie
 ```
 
 ## Acknowledgements

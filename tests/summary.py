@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 
 WORKDIR = Path(".")
-FLAKE = Path("examples")
 OTEL_VALUE_KEYS = ("stringValue", "intValue", "doubleValue", "boolValue")
 
 
@@ -70,10 +68,10 @@ def add_trace_diagram(lines, spans):
         "    todayMarker off",
     ]
     task = 0
-    for service in sorted({span["service"] or "unknown" for span in spans}):
-        lines.append(f"    section {mermaid_text(service)}")
-        service_spans = sorted((span for span in spans if (span["service"] or "unknown") == service), key=lambda span: (span["start"], span["name"]))
-        for span in service_spans:
+    for host in sorted({span["attrs"].get("host.name", "controller") for span in spans}):
+        lines.append(f"    section {mermaid_text(host)}")
+        host_spans = sorted((span for span in spans if span["attrs"].get("host.name", "controller") == host), key=lambda span: (span["start"], span["name"]))
+        for span in host_spans:
             task += 1
             status = span["status"] or "OK"
             ok = status in ("OK", "STATUS_CODE_UNSET")
@@ -87,19 +85,8 @@ def add_trace_diagram(lines, spans):
     lines.append("```")
 
 
-def hosts_diff(flake):
-    result = subprocess.run(
-        ["git", "-C", str(flake), "diff", "--no-ext-diff", "--", "hosts.json"],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.splitlines()
-
-
 def build_summary(result):
-    lines = ["## Nixie E2E Test", "", f"**{result.upper()}**", "", "```diff"]
-    lines += hosts_diff(FLAKE)
-    lines += ["```", ""]
+    lines = ["## Nixie E2E Test", "", f"**{result.upper()}**", ""]
     try:
         add_trace_diagram(lines, load_spans(WORKDIR / "trace.json"))
     except Exception as err:

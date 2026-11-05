@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import base64
+import hashlib
 import json
 import os
 import shlex
@@ -11,9 +13,6 @@ import sys
 import time
 from pathlib import Path
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
-
 
 BRIDGE = "brnxe"
 CONTROLLER_IP = "192.168.50.2"
@@ -24,19 +23,10 @@ TESTS_DIR = Path("tests")
 
 TIMEOUT = {"api": 30 * 60, "install": 45 * 60, "ssh": 30 * 60, "cold": 15 * 60}
 REQUIRED_ENV = ("NIXIE_BIN", "OVMF_CODE", "OVMF_VARS")
-FAILURES = (
-    "failed to install NixOS",
-    "failed to read final machine ID",
-    "failed to save hosts config",
-)
-SSH_SEED = bytes.fromhex("62d7724c580bc35680ef58daa05ddbdf8ce37f3de511d246973f64c227c8d8e7")
-SSH_OPTS = (
-    "-o", "BatchMode=yes", "-o", "ConnectTimeout=2",
-    "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-)
-
 PROCESSES = []
 LINKS = []
+NETWORK_RULES = []
+PREVIOUS_FORWARDING = None
 
 
 def log(message):
@@ -85,15 +75,34 @@ def stop(process):
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=10)
+    except ProcessLookupError:
+        process.wait(timeout=10)
     finally:
         process.log_handle.close()
 
 
+def shutdown_vm(process, workdir):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as monitor:
+        monitor.settimeout(5)
+        monitor.connect(str(workdir / f"{process.name}.monitor"))
+        monitor.sendall(b"system_powerdown\n")
+    process.wait(timeout=60)
+    if process.returncode != 0:
+        raise RuntimeError(f"{process.name} exited with status {process.returncode}")
+    stop(process)
+
+
 def cleanup():
-    for process in reversed(PROCESSES):
-        stop(process)
-    for link in reversed(LINKS):
-        subprocess.run(["ip", "link", "del", link], check=False)
+    try:
+        for process in reversed(PROCESSES):
+            stop(process)
+    finally:
+        for rule in reversed(NETWORK_RULES):
+            subprocess.run(rule, check=False)
+        if PREVIOUS_FORWARDING is not None:
+            Path("/proc/sys/net/ipv4/ip_forward").write_text(PREVIOUS_FORWARDING)
+        for link in reversed(LINKS):
+            subprocess.run(["ip", "link", "del", link], check=False)
 
 
 def wait_tcp(host, port, timeout, process=None):
@@ -112,90 +121,46 @@ def wait_tcp(host, port, timeout, process=None):
     raise TimeoutError(f"timed out waiting for {host}:{port}")
 
 
-def wait_socket(path, timeout, process=None):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if process and process.poll() is not None:
-            output = read(process.log_path)[-4000:]
-            raise RuntimeError(f"{process.name} exited before {path} was ready\n{output}")
-        if path.is_socket():
-            return
-        time.sleep(0.1)
-    raise TimeoutError(f"timed out waiting for {path}")
-
-
 def wait_nixie(process):
-    deadline = time.time() + TIMEOUT["install"]
-    while time.time() < deadline:
-        rc = process.poll()
-        if rc is not None:
-            if rc != 0:
-                raise RuntimeError(f"nixie exited with status {rc}")
-            return
-
-        output = read(process.log_path)[-200000:]
-        for marker in FAILURES:
-            if marker in output:
-                raise RuntimeError(f"nixie reported failure: {marker}")
-        time.sleep(1)
-    raise TimeoutError("timed out waiting for nixie to finish installing all hosts")
+    rc = process.wait(timeout=TIMEOUT["install"])
+    if rc != 0:
+        raise RuntimeError(f"nixie exited with status {rc}")
 
 
-def wait_ssh(key_path, machine, timeout):
-    cmd = ["ssh", "-i", str(key_path), *SSH_OPTS, f"root@{machine['ip']}", "hostname"]
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def wait_ssh_fingerprint(machine, timeout):
+    cmd = ["ssh-keyscan", "-T", "2", "-t", "ed25519", machine["ip"]]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip() == machine["name"]:
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if len(fields) != 3 or fields[1] != "ssh-ed25519":
+                continue
+            digest = hashlib.sha256(base64.b64decode(fields[2], validate=True)).digest()
+            fingerprint = "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+            if "fingerprint" in machine and fingerprint != machine["fingerprint"]:
+                raise RuntimeError(f"SSH fingerprint mismatch on {machine['name']}")
+            machine["fingerprint"] = fingerprint
             return
         time.sleep(2)
     raise TimeoutError(f"timed out waiting for SSH on {machine['ip']}")
 
 
-def write_key(workdir):
-    key_path = workdir / "id_ed25519"
-    key = ed25519.Ed25519PrivateKey.from_private_bytes(SSH_SEED)
-    key_path.write_bytes(
-        key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.OpenSSH,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-    )
-    key_path.chmod(0o600)
-    return key_path
-
-
-def start_ssh_agent(key_path, workdir):
-    socket_path = (workdir / "ssh-agent.sock").resolve()
-    process = start(
-        "ssh-agent",
-        ["ssh-agent", "-D", "-a", str(socket_path)],
-        workdir / "ssh-agent.log",
-    )
-    wait_socket(socket_path, 30, process=process)
-    run(["ssh-add", str(key_path)], env=os.environ | {"SSH_AUTH_SOCK": str(socket_path)})
-    return socket_path
+def wait_installer_reboot(machine, workdir):
+    serial = workdir / f"{machine['name']}.serial.log"
+    deadline = time.monotonic() + TIMEOUT["ssh"]
+    while time.monotonic() < deadline:
+        if "reboot: Restarting system" in read(serial):
+            return
+        time.sleep(1)
+    raise TimeoutError(f"installer did not reboot on {machine['name']}")
 
 
 def load_machines(hosts_path):
-    machines = []
-    for index, (name, host) in enumerate(json.loads(hosts_path.read_text()).items(), start=1):
-        mac = host.get("mac_address")
-        if not mac:
-            raise RuntimeError(f"missing MAC address for {name} in {hosts_path}")
-        machines.append({"name": name, "mac": mac, "ip": f"192.168.50.{10 + index}"})
-    if not machines:
-        raise RuntimeError(f"no hosts defined in {hosts_path}")
-    return machines
-
-
-def check_hosts(hosts_path, machines):
-    hosts = json.loads(hosts_path.read_text())
-    for machine in machines:
-        host = hosts[machine["name"]]
-        if host.get("ip") != machine["ip"] or len(host.get("machine_id_hash", "")) != 64:
-            raise RuntimeError(f"unexpected generated host data for {machine['name']}")
+    return [
+        {"name": name, "mac": host["mac_address"], "ip": host["ip"]}
+        for name, host in json.loads(hosts_path.read_text()).items()
+    ]
 
 
 def start_vm(machine, tap, workdir, initialize_disk):
@@ -208,9 +173,9 @@ def start_vm(machine, tap, workdir, initialize_disk):
 
     cmd = [
         "qemu-system-x86_64", "-name", name, "-machine", "q35",
-        "-m", "2048", "-smp", "2", "-display", "none",
+        "-m", "4096", "-smp", "2", "-display", "none",
         "-serial", f"file:{workdir / f'{name}.serial.log'}",
-        "-monitor", "none",
+        "-monitor", f"unix:{workdir / f'{name}.monitor'},server=on,wait=off",
         "-drive", f"if=pflash,format=raw,readonly=on,file={os.environ['OVMF_CODE']}",
         "-drive", f"if=pflash,format=raw,file={vars_path}",
         "-drive", f"if=none,id=disk0,file={disk},format=qcow2",
@@ -222,6 +187,17 @@ def start_vm(machine, tap, workdir, initialize_disk):
 
 
 def configure_network(taps):
+    global PREVIOUS_FORWARDING
+    forwarding = Path("/proc/sys/net/ipv4/ip_forward")
+    PREVIOUS_FORWARDING = forwarding.read_text()
+    forwarding.write_text("1")
+    for table, chain, args in [
+        ("nat", "POSTROUTING", ["-s", "192.168.50.0/24", "!", "-d", "192.168.50.0/24", "-j", "MASQUERADE"]),
+        ("filter", "FORWARD", ["-i", BRIDGE, "-j", "ACCEPT"]),
+        ("filter", "FORWARD", ["-o", BRIDGE, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"]),
+    ]:
+        run(["iptables", "-t", table, "-I", chain, *args])
+        NETWORK_RULES.append(["iptables", "-t", table, "-D", chain, *args])
     run(["ip", "link", "add", BRIDGE, "type", "bridge"])
     LINKS.append(BRIDGE)
     run(["ip", "addr", "add", f"{CONTROLLER_IP}/{CIDR}", "dev", BRIDGE])
@@ -234,15 +210,14 @@ def configure_network(taps):
         run(["ip", "link", "set", tap, "up"])
 
 
-def start_services(ssh_agent_socket, flake_ref, hosts_path, workdir):
+def start_services(flake_ref, hosts_path, workdir):
     start("otelcol", ["otelcol", "--config", str(TESTS_DIR / "otelcol.yaml")], workdir / "otelcol.log", cwd=workdir)
     wait_tcp("127.0.0.1", int(OTEL_ENDPOINT.rsplit(":", 1)[1]), 30)
-    start("dnsmasq", ["dnsmasq", "--keep-in-foreground", f"--conf-file={TESTS_DIR / 'dnsmasq.conf'}"], workdir / "dnsmasq.log")
+    start("dnsmasq", ["dnsmasq", "--keep-in-foreground", "--log-facility=-", f"--conf-file={TESTS_DIR / 'dnsmasq.conf'}"], workdir / "dnsmasq.log")
 
     env = os.environ | {
         "OTEL_EXPORTER_OTLP_ENDPOINT": f"http://{OTEL_ENDPOINT}",
         "OTEL_SERVICE_NAME": "nixie",
-        "SSH_AUTH_SOCK": str(ssh_agent_socket),
     }
     cmd = [
         os.environ["NIXIE_BIN"],
@@ -254,10 +229,10 @@ def start_services(ssh_agent_socket, flake_ref, hosts_path, workdir):
     return start("nixie", cmd, workdir / "nixie.log", env=env)
 
 
-def verify_ssh(machines, key_path, timeout, message):
+def verify_ssh(machines, timeout, message):
     for machine in machines:
-        wait_ssh(key_path, machine, timeout)
-        log(f"{message} {machine['name']} at {machine['ip']}")
+        wait_ssh_fingerprint(machine, timeout)
+        log(f"{message} {machine['name']} at {machine['ip']} {machine['fingerprint']}")
 
 
 def check_prerequisites():
@@ -283,7 +258,7 @@ def main():
     workdir = Path(".")
     flake = Path("examples")
     hosts_path = flake / "hosts.json"
-    key_path = write_key(workdir)
+    inventory = hosts_path.read_bytes()
     machines = load_machines(hosts_path)
     taps = [f"tapn{index + 1}" for index in range(len(machines))]
     qemus = []
@@ -292,22 +267,29 @@ def main():
     log(f"work directory: {workdir}")
     try:
         log(f"start e2e.run host_count={len(machines)}")
-        ssh_agent_socket = start_ssh_agent(key_path, workdir)
         configure_network(taps)
-        nixie = start_services(ssh_agent_socket, f"./{flake}", hosts_path, workdir)
+        nixie = start_services(f"./{flake}", hosts_path, workdir)
         wait_tcp(CONTROLLER_IP, NIXIE_API_PORT, TIMEOUT["api"], process=nixie)
         time.sleep(2)
 
         qemus = [start_vm(machine, tap, workdir, True) for machine, tap in zip(machines, taps, strict=True)]
         wait_nixie(nixie)
-        check_hosts(hosts_path, machines)
-        verify_ssh(machines, key_path, TIMEOUT["ssh"], "verified")
+        for machine in machines:
+            wait_installer_reboot(machine, workdir)
+        verify_ssh(machines, TIMEOUT["ssh"], "verified host key for")
 
-        log("power cycling machines to verify disk boot without the installer")
+        log("shutting down guests before cold disk boot without the installer")
         for qemu in reversed(qemus):
-            stop(qemu)
+            shutdown_vm(qemu, workdir)
         qemus = [start_vm(machine, tap, workdir, False) for machine, tap in zip(machines, taps, strict=True)]
-        verify_ssh(machines, key_path, TIMEOUT["cold"], "verified cold boot for")
+        verify_ssh(machines, TIMEOUT["cold"], "verified cold boot host key for")
+
+        log("rerunning Nixie to verify reachable hosts are skipped")
+        check = start("nixie-check", nixie.args, workdir / "nixie-check.log")
+        if check.wait(timeout=30) != 0:
+            raise RuntimeError("Nixie failed to skip reachable hosts")
+        if hosts_path.read_bytes() != inventory:
+            raise RuntimeError("Nixie modified the read-only inventory")
 
         passed = True
         log("end-to-end test passed")
@@ -316,7 +298,7 @@ def main():
     finally:
         cleanup()
         if not passed:
-            for name in ("ssh-agent", "otelcol", "nixie", "dnsmasq"):
+            for name in ("otelcol", "nixie", "nixie-check", "dnsmasq"):
                 print_tail(f"{name}.log", workdir / f"{name}.log", stream=sys.stderr)
         for machine in machines:
             print_tail(f"{machine['name']}.serial.log", workdir / f"{machine['name']}.serial.log")

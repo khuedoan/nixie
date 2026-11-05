@@ -1,79 +1,63 @@
 package hosts
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 )
 
-func TestHostsConfigRoundTrip(t *testing.T) {
+func TestInventoryRequiresIP(t *testing.T) {
 	path := t.TempDir() + "/hosts.json"
-	original := `{
-  "machine1": {
-    "mac_address": "bc:24:11:d0:28:34",
-    "ip": "192.168.1.42",
-    "machine_id_hash": "abc123"
-  }
-}`
-	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+
+	if err := os.WriteFile(path, []byte(`{"node":{"mac_address":"02:00:00:00:00:01"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	hostsConfig, err := LoadHostsConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveHostsConfig(path, hostsConfig); err != nil {
-		t.Fatal(err)
-	}
-	if data, err := os.ReadFile(path); err != nil {
-		t.Fatal(err)
-	} else if strings.Contains(string(data), "State") {
-		t.Fatalf("saved hosts file contains transient state: %s", data)
-	}
-
-	hostsConfig, err = LoadHostsConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := hostsConfig["machine1"]
-	if host == nil ||
-		host.MACAddress.String() != "bc:24:11:d0:28:34" ||
-		host.IP != "192.168.1.42" ||
-		host.MachineIDHash != "abc123" ||
-		host.GetState() != StateUnknown {
-		t.Fatalf("unexpected host after round trip: %+v", host)
+	if _, err := LoadHostsConfig(path); err == nil {
+		t.Fatal("accepted a host without its required IP address")
 	}
 }
 
-func TestHashMachineID(t *testing.T) {
-	machineID := "0123456789abcdef0123456789abcdef"
-	machineIDHash, err := HashMachineID(machineID + "\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(machineIDHash) != 64 || machineIDHash != strings.ToLower(machineIDHash) || machineIDHash == machineID {
-		t.Fatalf("invalid hash for machine ID: %q", machineIDHash)
-	}
-	if _, err := HashMachineID("not-a-machine-id"); err == nil {
-		t.Fatal("HashMachineID accepted invalid machine ID")
-	}
-}
-
-func TestSetFinalIdentityPreservesConfiguredIP(t *testing.T) {
+func TestInventoryRejectsDuplicateIdentities(t *testing.T) {
 	for _, test := range []struct {
-		name         string
-		configuredIP string
-		wantIP       string
+		name   string
+		field  string
+		first  string
+		second string
 	}{
-		{name: "configured", configuredIP: "192.0.2.10", wantIP: "192.0.2.10"},
-		{name: "discovered", wantIP: "192.0.2.20"},
+		{"normalized MAC", "mac_address", "02:00:00:00:00:0a", "02-00-00-00-00-0A"},
+		{"IP", "ip", "192.0.2.10", "192.0.2.10"},
+		{"normalized IPv6", "ip", "2001:db8::10", "2001:0db8:0:0:0:0:0:0010"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			host := &Host{IP: test.configuredIP}
-			host.SetFinalIdentity("192.0.2.20", "new-machine-id-hash")
-			if host.IP != test.wantIP || host.MachineIDHash != "new-machine-id-hash" {
-				t.Fatalf("final identity = (%q, %q), want (%q, %q)", host.IP, host.MachineIDHash, test.wantIP, "new-machine-id-hash")
+			inventory := map[string]map[string]string{
+				"first":  {"mac_address": "02:00:00:00:00:01", "ip": "192.0.2.10"},
+				"second": {"mac_address": "02:00:00:00:00:02", "ip": "192.0.2.11"},
+			}
+			inventory["first"][test.field] = test.first
+			inventory["second"][test.field] = test.second
+
+			data, err := json.Marshal(inventory)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			path := t.TempDir() + "/hosts.json"
+
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = LoadHostsConfig(path)
+			if err == nil {
+				t.Fatal("accepted duplicate host identities")
+			}
+
+			for _, detail := range []string{"first", "second", test.first} {
+				if !strings.Contains(err.Error(), detail) {
+					t.Fatalf("error %q does not identify conflict %q", err, detail)
+				}
 			}
 		})
 	}
