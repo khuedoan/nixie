@@ -15,7 +15,6 @@ type State int
 const (
 	StateUnknown State = iota
 	StateInstalling
-	StateVerifying
 	StateInstalled
 	StateFailed
 )
@@ -50,19 +49,6 @@ func (h *Host) CompareAndSwapState(from, to State) bool {
 	}
 
 	h.State = to
-	return true
-}
-
-// Fail records a terminal failure once, including failures during final verification.
-func (h *Host) Fail() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.State != StateInstalling && h.State != StateVerifying {
-		return false
-	}
-
-	h.State = StateFailed
 	return true
 }
 

@@ -47,14 +47,14 @@ func installFlake(ctx context.Context, flake string, reporter statusReporter) er
 		return err
 	}
 
-	if err := reporter.send(ctx, protocol.InstallResult{Status: protocol.StatusCompleted}); err != nil {
-		return err
-	}
-
 	started = time.Now()
 	err = scheduleReboot(ctx)
 	reporter.reportPhase(ctx, protocol.PhaseReboot, started, err)
-	return err
+	if err != nil {
+		return fmt.Errorf("schedule reboot: %w", err)
+	}
+
+	return reporter.send(ctx, protocol.InstallResult{Status: protocol.StatusCompleted})
 }
 
 func buildDisko(ctx context.Context, flake string) (string, error) {

@@ -146,6 +146,16 @@ def wait_ssh_fingerprint(machine, timeout):
     raise TimeoutError(f"timed out waiting for SSH on {machine['ip']}")
 
 
+def wait_installer_reboot(machine, workdir):
+    serial = workdir / f"{machine['name']}.serial.log"
+    deadline = time.monotonic() + TIMEOUT["ssh"]
+    while time.monotonic() < deadline:
+        if "reboot: Restarting system" in read(serial):
+            return
+        time.sleep(1)
+    raise TimeoutError(f"installer did not reboot on {machine['name']}")
+
+
 def load_machines(hosts_path):
     return [
         {"name": name, "mac": host["mac_address"], "ip": host["ip"]}
@@ -264,6 +274,8 @@ def main():
 
         qemus = [start_vm(machine, tap, workdir, True) for machine, tap in zip(machines, taps, strict=True)]
         wait_nixie(nixie)
+        for machine in machines:
+            wait_installer_reboot(machine, workdir)
         verify_ssh(machines, TIMEOUT["ssh"], "verified host key for")
 
         log("shutting down guests before cold disk boot without the installer")
