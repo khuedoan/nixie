@@ -86,15 +86,19 @@ left alone. Unreachable hosts are eligible for installation, including previousl
 installed hosts that are offline. Running Nixie authorizes provisioning those
 listed hosts; the configured IP must belong to the intended machine.
 
-After installation, Nixie waits for SSH at the configured IP and logs its
-Ed25519 host-key fingerprint. It does not log in or save the fingerprint.
-This verifies SSH reachability, not application health. No authorized user key,
-private key, or SSH agent is required. The installed system must expose an
-Ed25519 SSH host key on port 22.
+Nixie reports "installation complete, reboot scheduled" once the agent has
+installed NixOS and successfully scheduled a reboot through systemd. It then
+finishes without connecting to the installed system. This does not establish
+that the installed OS has booted or is ready; downstream deployment and E2E
+checks own readiness. Reboot scheduling failures fail the installation.
+
+The startup SSH check reads an Ed25519 host key on port 22 without logging in.
+No authorized user key, private key, or SSH agent is required. Installer SSH
+can use its normal port; it is not used as a post-install completion signal.
 
 Nixie supports only its custom x86_64 NixOS installer with
 `nixosModules.nixie-agent`. The module supplies the agent and its tools, runs it
-as root, disables installer SSH, and prevents automatic installation restarts.
+as root and prevents automatic installation restarts.
 It also exposes `system.build.nixieInstaller`, a single bundle containing the
 kernel, initrd, and init path that the controller builds for PXE.
 
@@ -115,8 +119,10 @@ runs as root, so public contents alone do not provide authenticity. Normal Nix
 signature checks remain enabled for downloaded dependencies.
 
 The agent uses one `/status` callback for admission, completed phases, errors,
-and completion. It waits for admission before destructive operations and for
-completion acknowledgment before reboot. Progress reports are best effort.
+and completion. It waits for admission before destructive operations. Only after
+reboot scheduling succeeds does it report completion and wait for acknowledgment.
+The scheduled reboot does not depend on receiving that acknowledgment. Progress
+reports are best effort.
 Each host produces one final result. Other hosts continue installing after a
 failure, and Nixie exits with an error after collecting all results. Interrupting
 a run also exits with an error.
@@ -168,22 +174,14 @@ sequenceDiagram
         Machines->>Nixie: Fetch shared source archive
         Machines->>Machines: Build and run disko to partition and mount disks
         Machines->>Machines: nixos-install --flake builds into target store and installs
-        Machines->>Nixie: Report installation result
-        Nixie-->>Machines: Acknowledge result
         Machines->>Machines: Schedule reboot through systemd
-
-        Note over Machines: Reboot after installation completed
-
-        Nixie->>Machines: Read Ed25519 host key through an SSH handshake
-        Nixie->>Nixie: Log observed SSH fingerprint
+        Machines->>Nixie: Report installation complete, reboot scheduled
+        Nixie-->>Machines: Acknowledge result
         deactivate Machines
-
-        activate Machines
-
-        Nixie->>Machines: Check host status
     end
 
-    Note over Nixie: Return when all machines are installed
+    Note over Nixie: Return when all machines report a final result
+    Note over Machines: Reboot and final-system readiness are not checked by Nixie
 ```
 
 ## Acknowledgements
