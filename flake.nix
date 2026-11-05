@@ -128,7 +128,6 @@
       nixosModules.nixie-agent =
         {
           config,
-          lib,
           pkgs,
           ...
         }:
@@ -147,7 +146,6 @@
               path = "${config.system.build.toplevel}/init";
             }
           ];
-          services.openssh.enable = lib.mkForce false;
           systemd.services.nixie-agent = {
             description = "Nixie Agent";
             wantedBy = [ "multi-user.target" ];
