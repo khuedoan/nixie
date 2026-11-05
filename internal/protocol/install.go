@@ -6,8 +6,10 @@ import "time"
 type InstallStatus string
 
 const (
-	StatusStarted   InstallStatus = "started"
-	StatusProgress  InstallStatus = "progress"
+	StatusStarted  InstallStatus = "started"
+	StatusProgress InstallStatus = "progress"
+
+	// StatusCompleted means installation finished and reboot was successfully scheduled.
 	StatusCompleted InstallStatus = "completed"
 	StatusFailed    InstallStatus = "failed"
 )

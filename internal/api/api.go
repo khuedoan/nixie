@@ -7,13 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"code.khuedoan.com/nixie/internal/hosts"
-	"code.khuedoan.com/nixie/internal/nixos"
 	"code.khuedoan.com/nixie/internal/protocol"
-	"code.khuedoan.com/nixie/internal/telemetry"
 
 	"github.com/charmbracelet/log"
 	"go.opentelemetry.io/otel"
@@ -23,12 +20,10 @@ import (
 )
 
 type API struct {
-	ctx             context.Context
-	hostsConfig     hosts.HostsConfig
-	sourceArchive   string
-	readFingerprint func(context.Context, string) (string, error)
-	results         chan<- error
-	workers         sync.WaitGroup
+	ctx           context.Context
+	hostsConfig   hosts.HostsConfig
+	sourceArchive string
+	results       chan<- error
 }
 
 func (api *API) status(w http.ResponseWriter, r *http.Request) {
@@ -76,13 +71,9 @@ func (api *API) status(w http.ResponseWriter, r *http.Request) {
 		api.failHost(host, name, errors.New(result.Error))
 
 	case protocol.StatusCompleted:
-		if host.CompareAndSwapState(hosts.StateInstalling, hosts.StateVerifying) {
-			api.workers.Add(1)
-
-			go func() {
-				defer api.workers.Done()
-				api.verifyHost(api.ctx, host, name)
-			}()
+		if host.CompareAndSwapState(hosts.StateInstalling, hosts.StateInstalled) {
+			log.Info("installation complete, reboot scheduled", "host", name, "ip", host.IP)
+			api.results <- nil
 		}
 
 	default:
@@ -127,38 +118,8 @@ func (api *API) recordPhase(name string, result protocol.InstallResult) error {
 	return nil
 }
 
-func (api *API) verifyHost(ctx context.Context, host *hosts.Host, name string) {
-	ctx, span := otel.Tracer("nixie").Start(ctx, "api.verify_host",
-		trace.WithAttributes(
-			attribute.String("host.mac", host.MACAddress),
-			attribute.String("host.name", name),
-		),
-	)
-	var verifyErr error
-	defer func() { telemetry.End(span, verifyErr) }()
-
-	fingerprint, verifyErr := api.readFingerprint(ctx, host.IP)
-	if verifyErr != nil {
-		api.failHost(host, name, verifyErr)
-
-		return
-	}
-
-	if !host.CompareAndSwapState(hosts.StateVerifying, hosts.StateInstalled) {
-		return
-	}
-
-	log.Info("successfully installed NixOS",
-		"host", name,
-		"ip", host.IP,
-		"ssh_fingerprint", fingerprint,
-	)
-
-	api.results <- nil
-}
-
 func (api *API) failHost(host *hosts.Host, name string, err error) {
-	if !host.Fail() {
+	if !host.CompareAndSwapState(hosts.StateInstalling, hosts.StateFailed) {
 		return
 	}
 
@@ -185,11 +146,10 @@ func StartAPIServer(
 	defer cancel()
 
 	api := &API{
-		ctx:             ctx,
-		hostsConfig:     hostsConfig,
-		sourceArchive:   sourceArchive,
-		readFingerprint: nixos.ReadHostFingerprint,
-		results:         results,
+		ctx:           ctx,
+		hostsConfig:   hostsConfig,
+		sourceArchive: sourceArchive,
+		results:       results,
 	}
 
 	server := &http.Server{
@@ -214,7 +174,6 @@ func StartAPIServer(
 
 	cancel()
 	<-shutdownDone
-	api.workers.Wait()
 
 	if !errors.Is(err, http.ErrServerClosed) {
 		return err
