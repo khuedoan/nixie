@@ -127,6 +127,22 @@
           ...
         }:
         {
+          # Single installer output to avoid race condition
+          # if the flake/installer content was updated while an existing build is running
+          system.build.nixieInstaller = pkgs.linkFarm "nixie-installer" [
+            {
+              name = "kernel";
+              path = "${config.system.build.kernel}/${config.system.boot.loader.kernelFile}";
+            }
+            {
+              name = "initrd";
+              path = "${config.system.build.netbootRamdisk}/initrd";
+            }
+            {
+              name = "init";
+              path = "${config.system.build.toplevel}/init";
+            }
+          ];
           systemd.services.nixie-agent = {
             description = "Nixie Agent";
             wantedBy = [ "multi-user.target" ];
