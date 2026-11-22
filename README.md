@@ -79,6 +79,11 @@ TODO add a demo video/asciinema.
 
 See the full example in [`./examples`](./examples).
 
+Nixie uses the IP and MAC addresses in `hosts.json` to identify machines and
+check their health over SSH after installation. The configured IP is the
+desired address of the installed system, you'll need to set it in your
+NixOS configuration or reserve it on your router.
+
 By default, Nixie authenticates through `ssh-agent`. Ensure the agent contains
 the keys authorized by both
 [`./examples/installer.nix`](./examples/installer.nix) and the installed system
@@ -86,32 +91,6 @@ in [`./examples/configuration.nix`](./examples/configuration.nix).
 
 You can override the agent socket with `--ssh-agent-socket`.
 Alternatively, specify the keys directly with `--install-ssh-key` and `--deployment-ssh-key`.
-
-Nixie uses `ip` for status checks via SSH after installation:
-
-- For DHCP, leave `ip` unset and let Nixie discover and save it.
-- For a static IP, set `ip` to the desired address and configure the same address
-  in NixOS, or have your NixOS configuration read it from the JSON file.
-
-After a successful installation, Nixie records the machine ID hash and fills
-in `ip` only when it was omitted or empty:
-
-```diff
- {
-   "machine1": {
--    "mac_address": "bc:24:11:d0:28:34"
-+    "mac_address": "bc:24:11:d0:28:34",
-+    "ip": "192.168.50.11",
-+    "machine_id_hash": "4bb69b8af140798fdab9cc04d2a1ad994af8ac9ca82db6df3f59133880872512"
-   },
-   "machine2": {
--    "mac_address": "bc:24:11:0d:2f:20"
-+    "mac_address": "bc:24:11:0d:2f:20",
-+    "ip": "192.168.50.12",
-+    "machine_id_hash": "9d307ce2870d0fdeef56348ac310a8743c1a8569b5131061fa9c487c64213067"
-   }
- }
-```
 
 ## How it works
 
@@ -126,8 +105,8 @@ sequenceDiagram
     Nixie->>Nixie: Load hosts.json
 
     loop For each machine
-    Nixie->>Machines: Try checking status
-    Nixie->>Nixie: Skip if already installed
+    Nixie->>Machines: Probe SSH at configured IP
+    Nixie->>Nixie: Skip if SSH responds
     end
 
     Nixie->>Nix: Build installer components<br/>(kernel, initrd, squashfs)
@@ -160,12 +139,8 @@ sequenceDiagram
 
         Nixie->>Machines: nixos-anywhere confirms machine rebooted
         Nixie->>Machines: Read final /etc/machine-id over SSH
-        Nixie->>Nixie: Write IP and machine ID hash to hosts.json
         deactivate Machines
 
-        activate Machines
-
-        Nixie->>Machines: Check host status
     end
 
     Note over Nixie: Return when all machines are installed
