@@ -6,74 +6,41 @@ import (
 	"testing"
 )
 
-func TestHostsConfigRoundTrip(t *testing.T) {
-	path := t.TempDir() + "/hosts.json"
-	original := `{
-  "machine1": {
-    "mac_address": "bc:24:11:d0:28:34",
-    "ip": "192.168.1.42",
-    "machine_id_hash": "abc123"
-  }
-}`
-	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	hostsConfig, err := LoadHostsConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveHostsConfig(path, hostsConfig); err != nil {
-		t.Fatal(err)
-	}
-	if data, err := os.ReadFile(path); err != nil {
-		t.Fatal(err)
-	} else if strings.Contains(string(data), "State") {
-		t.Fatalf("saved hosts file contains transient state: %s", data)
-	}
-
-	hostsConfig, err = LoadHostsConfig(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := hostsConfig["machine1"]
-	if host == nil ||
-		host.MACAddress.String() != "bc:24:11:d0:28:34" ||
-		host.IP != "192.168.1.42" ||
-		host.MachineIDHash != "abc123" ||
-		host.GetState() != StateUnknown {
-		t.Fatalf("unexpected host after round trip: %+v", host)
-	}
-}
-
-func TestHashMachineID(t *testing.T) {
-	machineID := "0123456789abcdef0123456789abcdef"
-	machineIDHash, err := HashMachineID(machineID + "\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(machineIDHash) != 64 || machineIDHash != strings.ToLower(machineIDHash) || machineIDHash == machineID {
-		t.Fatalf("invalid hash for machine ID: %q", machineIDHash)
-	}
-	if _, err := HashMachineID("not-a-machine-id"); err == nil {
-		t.Fatal("HashMachineID accepted invalid machine ID")
-	}
-}
-
-func TestSetFinalIdentityPreservesConfiguredIP(t *testing.T) {
+func TestLoadHostsConfig(t *testing.T) {
+	const first = `"first":{"mac_address":"02:00:00:00:00:01","ip":"192.0.2.1"}`
 	for _, test := range []struct {
-		name         string
-		configuredIP string
-		wantIP       string
+		name    string
+		host    string
+		wantErr string
 	}{
-		{name: "configured", configuredIP: "192.0.2.10", wantIP: "192.0.2.10"},
-		{name: "discovered", wantIP: "192.0.2.20"},
+		{"valid", `{"mac_address":"02-00-00-00-00-02","ip":"2001:0db8::2"}`, ""},
+		{"missing MAC", `{"ip":"192.0.2.2"}`, "invalid MAC address"},
+		{"invalid MAC", `{"mac_address":"bad","ip":"192.0.2.2"}`, "invalid MAC address"},
+		{"duplicate MAC", `{"mac_address":"02-00-00-00-00-01","ip":"192.0.2.2"}`, "share MAC address"},
+		{"missing IP", `{"mac_address":"02:00:00:00:00:02"}`, "invalid IP address"},
+		{"empty IP", `{"mac_address":"02:00:00:00:00:02","ip":""}`, "invalid IP address"},
+		{"invalid IP", `{"mac_address":"02:00:00:00:00:02","ip":"bad"}`, "invalid IP address"},
+		{"duplicate IP", `{"mac_address":"02:00:00:00:00:02","ip":"::ffff:192.0.2.1"}`, "share IP address"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			host := &Host{IP: test.configuredIP}
-			host.SetFinalIdentity("192.0.2.20", "new-machine-id-hash")
-			if host.IP != test.wantIP || host.MachineIDHash != "new-machine-id-hash" {
-				t.Fatalf("final identity = (%q, %q), want (%q, %q)", host.IP, host.MachineIDHash, test.wantIP, "new-machine-id-hash")
+			path := t.TempDir() + "/hosts.json"
+			data := `{` + first + `,"second":` + test.host + `}`
+			if err := os.WriteFile(path, []byte(data), 0o444); err != nil {
+				t.Fatal(err)
+			}
+			config, err := LoadHostsConfig(path)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("LoadHostsConfig() error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := config["second"]
+			if host.MACAddress.String() != "02:00:00:00:00:02" || host.IP != "2001:db8::2" || host.GetState() != StateUnknown {
+				t.Fatalf("unexpected host: %+v", host)
 			}
 		})
 	}

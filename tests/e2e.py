@@ -26,8 +26,7 @@ TIMEOUT = {"api": 30 * 60, "install": 45 * 60, "ssh": 30 * 60, "cold": 15 * 60}
 REQUIRED_ENV = ("NIXIE_BIN", "OVMF_CODE", "OVMF_VARS")
 FAILURES = (
     "failed to install NixOS",
-    "failed to read final machine ID",
-    "failed to save hosts config",
+    "failed to verify installed host",
 )
 SSH_SEED = bytes.fromhex("62d7724c580bc35680ef58daa05ddbdf8ce37f3de511d246973f64c227c8d8e7")
 SSH_OPTS = (
@@ -179,23 +178,18 @@ def start_ssh_agent(key_path, workdir):
 
 
 def load_machines(hosts_path):
-    machines = []
-    for index, (name, host) in enumerate(json.loads(hosts_path.read_text()).items(), start=1):
-        mac = host.get("mac_address")
-        if not mac:
-            raise RuntimeError(f"missing MAC address for {name} in {hosts_path}")
-        machines.append({"name": name, "mac": mac, "ip": f"192.168.50.{10 + index}"})
+    machines = [
+        {"name": name, "mac": host["mac_address"], "ip": host["ip"]}
+        for name, host in json.loads(hosts_path.read_bytes()).items()
+    ]
     if not machines:
         raise RuntimeError(f"no hosts defined in {hosts_path}")
     return machines
 
 
-def check_hosts(hosts_path, machines):
-    hosts = json.loads(hosts_path.read_text())
-    for machine in machines:
-        host = hosts[machine["name"]]
-        if host.get("ip") != machine["ip"] or len(host.get("machine_id_hash", "")) != 64:
-            raise RuntimeError(f"unexpected generated host data for {machine['name']}")
+def check_hosts(hosts_path, original):
+    if hosts_path.read_bytes() != original:
+        raise RuntimeError(f"inventory changed: {hosts_path}")
 
 
 def start_vm(machine, tap, workdir, initialize_disk):
@@ -234,11 +228,13 @@ def configure_network(taps):
         run(["ip", "link", "set", tap, "up"])
 
 
-def start_services(ssh_agent_socket, flake_ref, hosts_path, workdir):
+def start_services(workdir):
     start("otelcol", ["otelcol", "--config", str(TESTS_DIR / "otelcol.yaml")], workdir / "otelcol.log", cwd=workdir)
     wait_tcp("127.0.0.1", int(OTEL_ENDPOINT.rsplit(":", 1)[1]), 30)
     start("dnsmasq", ["dnsmasq", "--keep-in-foreground", f"--conf-file={TESTS_DIR / 'dnsmasq.conf'}"], workdir / "dnsmasq.log")
 
+
+def start_nixie(ssh_agent_socket, flake_ref, hosts_path, log_path):
     env = os.environ | {
         "OTEL_EXPORTER_OTLP_ENDPOINT": f"http://{OTEL_ENDPOINT}",
         "OTEL_SERVICE_NAME": "nixie",
@@ -251,7 +247,7 @@ def start_services(ssh_agent_socket, flake_ref, hosts_path, workdir):
         "--flake", flake_ref, "--hosts", str(hosts_path),
         "--debug",
     ]
-    return start("nixie", cmd, workdir / "nixie.log", env=env)
+    return start("nixie", cmd, log_path, env=env)
 
 
 def verify_ssh(machines, key_path, timeout, message):
@@ -284,6 +280,7 @@ def main():
     flake = Path("examples")
     hosts_path = flake / "hosts.json"
     key_path = write_key(workdir)
+    original_hosts = hosts_path.read_bytes()
     machines = load_machines(hosts_path)
     taps = [f"tapn{index + 1}" for index in range(len(machines))]
     qemus = []
@@ -294,13 +291,14 @@ def main():
         log(f"start e2e.run host_count={len(machines)}")
         ssh_agent_socket = start_ssh_agent(key_path, workdir)
         configure_network(taps)
-        nixie = start_services(ssh_agent_socket, f"./{flake}", hosts_path, workdir)
+        start_services(workdir)
+        nixie = start_nixie(ssh_agent_socket, f"./{flake}", hosts_path, workdir / "nixie.log")
         wait_tcp(CONTROLLER_IP, NIXIE_API_PORT, TIMEOUT["api"], process=nixie)
         time.sleep(2)
 
         qemus = [start_vm(machine, tap, workdir, True) for machine, tap in zip(machines, taps, strict=True)]
         wait_nixie(nixie)
-        check_hosts(hosts_path, machines)
+        check_hosts(hosts_path, original_hosts)
         verify_ssh(machines, key_path, TIMEOUT["ssh"], "verified")
 
         log("power cycling machines to verify disk boot without the installer")
@@ -309,6 +307,15 @@ def main():
         qemus = [start_vm(machine, tap, workdir, False) for machine, tap in zip(machines, taps, strict=True)]
         verify_ssh(machines, key_path, TIMEOUT["cold"], "verified cold boot for")
 
+        log("rerunning Nixie with the installed machines online")
+        rerun = start_nixie(ssh_agent_socket, f"./{flake}", hosts_path, workdir / "nixie-rerun.log")
+        if rerun.wait(timeout=30) != 0:
+            raise RuntimeError("Nixie rerun failed")
+        output = read(rerun.log_path)
+        if "all hosts are already installed" not in output or "building installer" in output:
+            raise RuntimeError("Nixie rerun did not skip the installed hosts")
+        check_hosts(hosts_path, original_hosts)
+
         passed = True
         log("end-to-end test passed")
     except Exception as err:
@@ -316,7 +323,7 @@ def main():
     finally:
         cleanup()
         if not passed:
-            for name in ("ssh-agent", "otelcol", "nixie", "dnsmasq"):
+            for name in ("ssh-agent", "otelcol", "nixie", "nixie-rerun", "dnsmasq"):
                 print_tail(f"{name}.log", workdir / f"{name}.log", stream=sys.stderr)
         for machine in machines:
             print_tail(f"{machine['name']}.serial.log", workdir / f"{machine['name']}.serial.log")

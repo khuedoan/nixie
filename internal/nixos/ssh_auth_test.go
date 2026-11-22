@@ -8,10 +8,7 @@ import (
 	"testing"
 )
 
-const (
-	testMachineID     = "0123456789abcdef0123456789abcdef"
-	testMachineIDHash = "dada2cfcc22d3f6285b65cf851d8582adeeb8d70f7f0fcfe9402cbef732b23ec"
-)
+const testMachineID = "0123456789abcdef0123456789abcdef"
 
 func TestInstallUsesSSHAgentWithoutIdentityFile(t *testing.T) {
 	captureFile := installFakeCommand(t, "nixos-anywhere", "exit 0")
@@ -24,16 +21,12 @@ func TestInstallUsesSSHAgentWithoutIdentityFile(t *testing.T) {
 	assertSSHInvocation(t, captureFile, socket, "")
 }
 
-func TestReadMachineIDUsesSSHAgentWithoutIdentityFile(t *testing.T) {
+func TestVerifyInstalledHostUsesSSHAgentWithoutIdentityFile(t *testing.T) {
 	captureFile := installFakeCommand(t, "ssh", `printf '%s\n' `+testMachineID)
 	socket := "/run/user/1000/ssh-agent.sock"
 
-	machineIDHash, err := ReadMachineIDHash(context.Background(), "root", "192.0.2.1", "", socket, false)
-	if err != nil {
-		t.Fatalf("ReadMachineIDHash() error = %v", err)
-	}
-	if machineIDHash != testMachineIDHash {
-		t.Fatalf("ReadMachineIDHash() = %q, want %q", machineIDHash, testMachineIDHash)
+	if err := VerifyInstalledHost(context.Background(), "root", "192.0.2.1", "", socket, false); err != nil {
+		t.Fatalf("VerifyInstalledHost() error = %v", err)
 	}
 
 	assertSSHInvocation(t, captureFile, socket, "")
@@ -44,25 +37,23 @@ func TestCommandsUseSSHKey(t *testing.T) {
 		name          string
 		command       string
 		commandResult string
-		run           func(context.Context, string) (string, error)
-		wantResult    string
+		run           func(context.Context, string) error
 	}{
 		{
 			name:          "install",
 			command:       "nixos-anywhere",
 			commandResult: "exit 0",
-			run: func(ctx context.Context, key string) (string, error) {
-				return "", Install(ctx, ".#claw", "root", "192.0.2.1", key, "", false)
+			run: func(ctx context.Context, key string) error {
+				return Install(ctx, ".#claw", "root", "192.0.2.1", key, "", false)
 			},
 		},
 		{
-			name:          "read machine ID",
+			name:          "verify installed host",
 			command:       "ssh",
 			commandResult: `printf '%s\n' ` + testMachineID,
-			run: func(ctx context.Context, key string) (string, error) {
-				return ReadMachineIDHash(ctx, "root", "192.0.2.1", key, "", false)
+			run: func(ctx context.Context, key string) error {
+				return VerifyInstalledHost(ctx, "root", "192.0.2.1", key, "", false)
 			},
-			wantResult: testMachineIDHash,
 		},
 	}
 
@@ -72,12 +63,8 @@ func TestCommandsUseSSHKey(t *testing.T) {
 			captureFile := installFakeCommand(t, test.command, test.commandResult)
 			key := "/keys/id_ed25519"
 
-			result, err := test.run(context.Background(), key)
-			if err != nil {
+			if err := test.run(context.Background(), key); err != nil {
 				t.Fatalf("command error = %v", err)
-			}
-			if result != test.wantResult {
-				t.Fatalf("command result = %q, want %q", result, test.wantResult)
 			}
 
 			assertSSHInvocation(t, captureFile, "", key)

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
 
 	"code.khuedoan.com/nixie/internal/hosts"
 	"code.khuedoan.com/nixie/internal/nixos"
@@ -22,8 +21,6 @@ import (
 type API struct {
 	ctx               context.Context
 	hostsConfig       hosts.HostsConfig
-	hostsFile         string
-	saveMu            sync.Mutex
 	flake             string
 	installSSHKey     string
 	deploymentSSHUser string
@@ -121,36 +118,18 @@ func (api *API) installHost(ctx context.Context, host *hosts.Host, flakeOutput, 
 		return fmt.Errorf("failed to install NixOS: %w", err)
 	}
 
-	finalIP := host.GetIP()
-	if finalIP == "" {
-		finalIP = ip
+	if err := nixos.VerifyInstalledHost(ctx, api.deploymentSSHUser, host.IP, api.deploymentSSHKey, api.sshAgentSocket, api.debug); err != nil {
+		return fmt.Errorf("failed to verify installed host: %w", err)
 	}
-	machineIDHash, err := nixos.ReadMachineIDHash(ctx, api.deploymentSSHUser, finalIP, api.deploymentSSHKey, api.sshAgentSocket, api.debug)
-	if err != nil {
-		return fmt.Errorf("failed to read final machine ID: %w", err)
-	}
-	span.SetAttributes(attribute.String("host.machine_id_hash", machineIDHash))
-	host.SetFinalIdentity(finalIP, machineIDHash)
-	if err := api.saveHosts(); err != nil {
-		return fmt.Errorf("failed to save hosts config %s: %w", api.hostsFile, err)
-	}
-	log.Info("successfully installed NixOS", "ip", finalIP, "flake", flake)
+	log.Info("successfully installed NixOS", "ip", host.IP, "flake", flake)
 	host.SetState(hosts.StateInstalled)
 	return nil
 }
 
-func (api *API) saveHosts() error {
-	api.saveMu.Lock()
-	defer api.saveMu.Unlock()
-
-	return hosts.SaveHostsConfig(api.hostsFile, api.hostsConfig)
-}
-
-func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, hostsFile string, flake string, installSSHKey string, deploymentSSHUser string, deploymentSSHKey string, sshAgentSocket string, debug bool, doneCh chan struct{}) error {
+func StartAPIServer(ctx context.Context, hostsConfig hosts.HostsConfig, flake string, installSSHKey string, deploymentSSHUser string, deploymentSSHKey string, sshAgentSocket string, debug bool, doneCh chan struct{}) error {
 	api := &API{
 		ctx:               ctx,
 		hostsConfig:       hostsConfig,
-		hostsFile:         hostsFile,
 		flake:             flake,
 		installSSHKey:     installSSHKey,
 		deploymentSSHUser: deploymentSSHUser,

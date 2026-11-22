@@ -3,13 +3,13 @@ package nixos
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
-	"code.khuedoan.com/nixie/internal/hosts"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -21,8 +21,8 @@ const (
 	machineIDReadInterval = 2 * time.Second
 )
 
-func ReadMachineIDHash(ctx context.Context, user, host, sshKey, sshAgentSocket string, debug bool) (machineIDHash string, err error) {
-	ctx, span := otel.Tracer("nixie").Start(ctx, "nixos.read_machine_id_hash", trace.WithAttributes(
+func VerifyInstalledHost(ctx context.Context, user, host, sshKey, sshAgentSocket string, debug bool) (err error) {
+	ctx, span := otel.Tracer("nixie").Start(ctx, "nixos.verify_installed_host", trace.WithAttributes(
 		attribute.String("net.peer.ip", host),
 		attribute.String("ssh.target", sshTarget(user, host)),
 	))
@@ -35,24 +35,19 @@ func ReadMachineIDHash(ctx context.Context, user, host, sshKey, sshAgentSocket s
 	}()
 
 	if sshKey == "" && sshAgentSocket == "" {
-		return "", fmt.Errorf("deployment SSH key or SSH agent socket is required")
+		return fmt.Errorf("deployment SSH key or SSH agent socket is required")
 	}
 
-	var lastErr error
 	attempts := 0
 	timeout := time.After(machineIDReadTimeout)
 
 	for {
 		attempts++
-		machineIDHash, err = readMachineIDHashOnce(ctx, user, host, sshKey, sshAgentSocket, debug)
+		err = verifyInstalledHostOnce(ctx, user, host, sshKey, sshAgentSocket, debug)
 		if err == nil {
-			span.SetAttributes(
-				attribute.Int("ssh.attempts", attempts),
-				attribute.String("host.machine_id_hash", machineIDHash),
-			)
-			return machineIDHash, nil
+			span.SetAttributes(attribute.Int("ssh.attempts", attempts))
+			return nil
 		}
-		lastErr = err
 		span.SetAttributes(
 			attribute.Int("ssh.attempts", attempts),
 			attribute.String("ssh.last_error", err.Error()),
@@ -60,15 +55,15 @@ func ReadMachineIDHash(ctx context.Context, user, host, sshKey, sshAgentSocket s
 
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("read final machine ID: %w", ctx.Err())
+			return fmt.Errorf("read final machine ID: %w", ctx.Err())
 		case <-timeout:
-			return "", fmt.Errorf("timed out reading final machine ID from %s: %w", host, lastErr)
+			return fmt.Errorf("timed out reading final machine ID from %s: %w", host, err)
 		case <-time.After(machineIDReadInterval):
 		}
 	}
 }
 
-func readMachineIDHashOnce(ctx context.Context, user, host, sshKey, sshAgentSocket string, debug bool) (string, error) {
+func verifyInstalledHostOnce(ctx context.Context, user, host, sshKey, sshAgentSocket string, debug bool) error {
 	args := []string{
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=5",
@@ -94,17 +89,19 @@ func readMachineIDHashOnce(ctx context.Context, user, host, sshKey, sshAgentSock
 	if err := cmd.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message != "" {
-			return "", fmt.Errorf("ssh failed: %w: %s", err, message)
+			return fmt.Errorf("ssh failed: %w: %s", err, message)
 		}
-		return "", fmt.Errorf("ssh failed: %w", err)
+		return fmt.Errorf("ssh failed: %w", err)
 	}
 
-	machineIDHash, err := hosts.HashMachineID(stdout.String())
-	if err != nil {
-		return "", fmt.Errorf("failed to hash machine ID: %w", err)
+	machineID := strings.TrimSpace(stdout.String())
+	if len(machineID) != 32 {
+		return fmt.Errorf("invalid machine ID length: got %d, want 32", len(machineID))
 	}
-
-	return machineIDHash, nil
+	if _, err := hex.DecodeString(machineID); err != nil {
+		return fmt.Errorf("machine ID is not hexadecimal")
+	}
+	return nil
 }
 
 func sshTarget(user, host string) string {
